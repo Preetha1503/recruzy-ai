@@ -1,0 +1,167 @@
+export type Database = {
+  public: {
+    Tables: {
+      tests: {
+        Row: {
+          id: string
+          created_at: string
+          created_by: string
+          description: string | null
+          duration: number
+          status: "draft" | "active" | "published" | "completed"
+          title: string
+          topic: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          description?: string | null
+          duration: number
+          status?: "draft" | "active" | "published" | "completed"
+          title: string
+          topic: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          duration?: number
+          status?: "draft" | "active" | "published" | "completed"
+          title?: string
+          topic?: string
+          updated_at?: string | null
+        }
+      }
+      users: {
+        Row: {
+          id: string
+          created_at: string
+          email: string
+          username: string
+          role: "admin" | "user"
+          last_login: string | null
+          password?: string | null
+          bio?: string | null
+          notification_settings?: any | null
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          email: string
+          username: string
+          role?: "admin" | "user"
+          last_login?: string | null
+          password?: string | null
+          bio?: string | null
+          notification_settings?: any | null
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          email?: string
+          username?: string
+          role?: "admin" | "user"
+          last_login?: string | null
+          password?: string | null
+          bio?: string | null
+          notification_settings?: any | null
+        }
+      }
+      questions: {
+        Row: {
+          id: string
+          test_id: string
+          text: string
+          options: string[]
+          correct_answer: number
+          explanation: string | null
+          difficulty: "easy" | "intermediate" | "hard"
+          created_at: string
+        }
+        Insert: {
+          test_id: string
+          text: string
+          options: string[]
+          correct_answer: number
+          explanation?: string | null
+          difficulty: "easy" | "intermediate" | "hard"
+          created_at?: string
+        }
+        Update: {
+          test_id?: string
+          text?: string
+          options?: string[]
+          correct_answer?: number
+          explanation?: string | null
+          difficulty?: "easy" | "intermediate" | "hard"
+          created_at?: string
+        }
+      }
+      test_results: {
+        Row: {
+          id: string
+          user_id: string
+          test_id: string
+          score: number
+          answers: Record<string, number>
+          time_taken: number | null
+          started_at: string | null
+          completed_at: string
+        }
+        Insert: {
+          user_id: string
+          test_id: string
+          score: number
+          answers: Record<string, number>
+          time_taken?: number | null
+          started_at?: string | null
+          completed_at: string
+        }
+        Update: {
+          user_id?: string
+          test_id?: string
+          score?: number
+          answers?: Record<string, number>
+          time_taken?: number | null
+          started_at?: string | null
+          completed_at?: string
+        }
+      }
+      user_tests: {
+        Row: {
+          id: string
+          user_id: string
+          test_id: string
+          assigned_at: string
+          due_date: string | null
+          status: "assigned" | "started" | "completed"
+        }
+        Insert: {
+          user_id: string
+          test_id: string
+          assigned_at: string
+          due_date?: string | null
+          status?: "assigned" | "started" | "completed"
+        }
+        Update: {
+          user_id?: string
+          test_id?: string
+          assigned_at?: string
+          due_date?: string | null
+          status?: "assigned" | "started" | "completed"
+        }
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
+    }
+  }
+}
