@@ -11,7 +11,6 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { setCookie } from "@/lib/cookie-utils"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
@@ -75,16 +74,16 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-purple-50 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center text-purple-800">Recruzy</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center text-purple-800">Login</CardTitle>
           <CardDescription className="text-center">Enter your credentials to access your account</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
-            {successMessage && (
+            {/* {successMessage && (
               <Alert className="bg-green-50 border-green-200">
                 <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
               </Alert>
-            )}
+            )} */}
 
             {error && (
               <div className="p-3 rounded-md bg-red-50 text-red-800 text-sm">

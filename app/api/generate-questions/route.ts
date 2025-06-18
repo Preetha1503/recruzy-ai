@@ -40,27 +40,31 @@ export async function POST(request) {
       // Format the prompt for Gemini to generate multiple-choice questions for this difficulty
       const prompt = `Generate EXACTLY ${difficultyCount} multiple-choice interview questions about ${topic} with difficulty level: ${difficulty}. 
 
-      For each question, provide:
-      1. The question text
-      2. Four possible answer options (labeled as options array)
-      3. The correct answer (as an index 0-3)
-      4. A brief explanation of why the correct answer is correct
-      5. The difficulty level (${difficulty})
-      
-      Format your response EXACTLY as a valid JSON array with objects containing these fields:
-      - "text": the question text (string)
-      - "options": an array of 4 strings representing the possible answers
-      - "correct_answer": the index (0-3) of the correct option (number)
-      - "explanation": explanation of the correct answer (string)
-      - "difficulty": the difficulty level (string)
-      
-      Make sure the questions are challenging and test deep understanding of ${topic}.
-      IMPORTANT: Your response must be a valid JSON array that can be parsed with JSON.parse().
-      Do not include any text before or after the JSON array.
-      Do not use markdown formatting.
-      Do not use backticks.
-      Do not include any explanations outside the JSON array.
-      MOST IMPORTANT: Generate EXACTLY ${difficultyCount} questions, no more and no less.`
+IMPORTANT INSTRUCTIONS:
+1. Return ONLY a valid JSON array
+2. Do NOT include any markdown formatting, backticks, or explanatory text outside the array
+3. Each question must be an object with the following fields:
+   - "text": string (the question text)
+   - "options": array of exactly 4 plausible strings
+   - "correct_answer": number (0 to 3)
+   - "explanation": string
+   - "difficulty": string
+4. Options must be plausible and not make the correct answer too obvious. Avoid patterns where three are clearly wrong and one is clearly unique.
+5. Ensure 50% of the questions are theoretical (concepts, definitions), and 50% are analytical (logic-based, use-cases, problem-solving).
+6. Ensure JSON strings are properly escaped and parsable via JSON.parse()
+
+Example format:
+[
+  {
+    "text": "What is the primary purpose of React hooks?",
+    "options": ["To replace class components", "To manage state in functional components", "To handle routing", "To style components"],
+    "correct_answer": 1,
+    "explanation": "React hooks allow functional components to use state and other React features without writing a class.",
+    "difficulty": "${difficulty}"
+  }
+]
+
+DO NOT include anything except the JSON array. Generate EXACTLY ${difficultyCount} questions with ${difficulty} difficulty about ${topic}, evenly split between theoretical and analytical.`
 
       console.log(`Sending request to Gemini API for ${difficultyCount} ${difficulty} questions about ${topic}`)
 
