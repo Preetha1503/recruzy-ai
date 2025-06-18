@@ -1,59 +1,78 @@
-import { createClient } from "@supabase/supabase-js"
-import type { CookieOptions } from "@supabase/supabase-js"
+import { createServerClient as createSupabaseServerClient, type CookieOptions } from "@supabase/ssr"
+import { cookies } from "next/headers"
 
-// Ensure environment variables are available
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-const supabaseServiceKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  ""
+// Create a server-side Supabase client
+export function createServerClient() {
+  const cookieStore = cookies()
 
-// Create a server-side Supabase client without using next/headers
-export const supabaseServer = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: false,
-  },
-})
-
-// For backwards compatibility
-export default supabaseServer
-
-// Export a function to create a client with cookies if needed
-export const createServerClient = (cookieStore?: any) => {
-  try {
-    if (!cookieStore) {
-      return supabaseServer
-    }
-
-    return createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: false,
+  return createSupabaseServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    cookies: {
+      get(name: string) {
+        return cookieStore.get(name)?.value
       },
+      set(name: string, value: string, options: CookieOptions) {
+        try {
+          cookieStore.set({ name, value, ...options })
+        } catch (error) {
+          // The `set` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing
+          // user sessions.
+        }
+      },
+      remove(name: string, options: CookieOptions) {
+        try {
+          cookieStore.set({ name, value: "", ...options })
+        } catch (error) {
+          // The `delete` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing
+          // user sessions.
+        }
+      },
+    },
+  })
+}
+
+// Create a singleton server client to prevent multiple instances
+let serverClient: any = null
+
+export function createServerSupabaseClient() {
+  if (serverClient) {
+    return serverClient
+  }
+
+  const cookieStore = cookies()
+
+  serverClient = createSupabaseServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
       cookies: {
         get(name: string) {
-          return cookieStore.get(name)?.value || null
+          return cookieStore.get(name)?.value
         },
         set(name: string, value: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value, ...options })
-          } catch (e) {
-            console.warn("Failed to set cookie in server:", e)
+          } catch (error) {
+            // Ignore cookie setting errors in Server Components
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
-            cookieStore.delete({ name, ...options })
-          } catch (e) {
-            console.warn("Failed to remove cookie in server:", e)
+            cookieStore.set({ name, value: "", ...options })
+          } catch (error) {
+            // Ignore cookie removal errors in Server Components
           }
         },
       },
-    })
-  } catch (error) {
-    console.error("Error creating server client:", error)
-    throw error
-  }
+    },
+  )
+
+  return serverClient
 }
+
+// Export the singleton instance
+export const supabaseServer = createServerSupabaseClient()
+
+// For backwards compatibility
+export default supabaseServer
