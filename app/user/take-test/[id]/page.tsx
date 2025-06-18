@@ -1,1416 +1,487 @@
 "use client"
+
 import { useState, useEffect, useRef, useCallback } from "react"
-import type { TestWithQuestions } from "@/lib/types"
-import { DashboardLayout } from "@/components/dashboard-layout"
+import { useRouter, useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { AlertCircle, CheckCircle, Clock, AlertTriangle, Shield } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import Link from "next/link"
-import { submitTestResult } from "@/app/actions/results"
-import { useRouter } from "next/navigation"
+import { AlertCircle, Clock, Shield, Code, Brain, Wrench } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { PermissionRequest } from "@/components/test/permission-request"
-import { AIProctoring } from "@/components/test/ai-proctor"
-import { WatermarkOverlay } from "@/components/test/watermark-overlay"
-import { ProgrammingQuestion } from "@/components/test/programming-question"
 
-export default function TakeTest({ params }: { params: { id: string } }) {
+// Watermark component
+const WatermarkOverlay = ({ userEmail }: { userEmail: string }) => {
+  return (
+    <div className="fixed inset-0 pointer-events-none z-10 overflow-hidden">
+      <div className="absolute inset-0 opacity-10">
+        {Array.from({ length: 20 }).map((_, i) => (
+          <div
+            key={i}
+            className="absolute text-gray-400 text-sm font-mono transform -rotate-45 select-none"
+            style={{
+              left: `${(i % 5) * 20}%`,
+              top: `${Math.floor(i / 5) * 25}%`,
+              transform: `rotate(-45deg) translate(${Math.random() * 50}px, ${Math.random() * 50}px)`,
+            }}
+          >
+            {userEmail}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Question type icon component
+const QuestionTypeIcon = ({ type }: { type: string }) => {
+  switch (type) {
+    case "theoretical":
+      return <Brain className="h-4 w-4 text-blue-500" />
+    case "code_snippet":
+      return <Code className="h-4 w-4 text-green-500" />
+    case "practical":
+      return <Wrench className="h-4 w-4 text-orange-500" />
+    default:
+      return <Brain className="h-4 w-4 text-gray-500" />
+  }
+}
+
+export default function TakeTest() {
   const router = useRouter()
-  const testId = params.id
+  const params = useParams()
   const { toast } = useToast()
+  const testId = params.id as string
 
-  const [test, setTest] = useState<TestWithQuestions | null>(null)
-  const [currentQuestion, setCurrentQuestion] = useState(0)
-  const [answers, setAnswers] = useState<(number | null)[]>([])
-  const [markedForReview, setMarkedForReview] = useState<boolean[]>([])
-  const [timeLeft, setTimeLeft] = useState(3600) // Default 60 minutes in seconds
-  const [isSubmitDialogOpen, setIsSubmitDialogOpen] = useState(false)
-  const [isTimeUpDialogOpen, setIsTimeUpDialogOpen] = useState(false)
+  // Test state
+  const [test, setTest] = useState<any>(null)
+  const [questions, setQuestions] = useState<any[]>([])
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
+  const [answers, setAnswers] = useState<Record<string, number>>({})
+  const [timeRemaining, setTimeRemaining] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [startTime] = useState(new Date().toISOString())
-  const [userId, setUserId] = useState<string | null>(null)
-  const [userName, setUserName] = useState<string | null>(null)
-  const [permissionsGranted, setPermissionsGranted] = useState(false)
-  const [showGuidelines, setShowGuidelines] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState("")
+  const [userEmail, setUserEmail] = useState("")
+
+  // Security state
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [fullscreenWarning, setFullscreenWarning] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const [showSidebar, setShowSidebar] = useState(true)
-  const [tabSwitchAttempts, setTabSwitchAttempts] = useState(0)
-  const [isTabVisible, setIsTabVisible] = useState(true)
-  const [showTabWarning, setShowTabWarning] = useState(false)
-  const [obscureContent, setObscureContent] = useState(false)
-  const [proctorViolations, setProctoringViolations] = useState<{
-    noFace: number
-    multipleFaces: number
-  }>({ noFace: 0, multipleFaces: 0 })
-  const [showFaceWarning, setShowFaceWarning] = useState(false)
-  const [showMultipleFacesWarning, setShowMultipleFacesWarning] = useState(false)
-  const [violationType, setViolationType] = useState<"no_face" | "multiple_faces" | null>(null)
-  const [cameraActive, setCameraActive] = useState(true)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-
-  // New states for test pausing
-  const [testPaused, setTestPaused] = useState(false)
-  const [pauseReason, setPauseReason] = useState<string | null>(null)
-  const [pendingViolation, setPendingViolation] = useState<"no_face" | "multiple_faces" | null>(null)
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const pauseStartTimeRef = useRef<number | null>(null)
-  const pauseTotalTimeRef = useRef<number>(0)
-
-  // New states for client-side exception handling
-  const [clientErrors, setClientErrors] = useState(0)
-  const [showErrorDialog, setShowErrorDialog] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string>("")
-  const [pendingError, setPendingError] = useState(false)
-
-  // Increased thresholds for violations
-  const MAX_NO_FACE_VIOLATIONS = 5
-  const MAX_MULTIPLE_FACES_VIOLATIONS = 5
-  const MAX_TAB_SWITCH_VIOLATIONS = 5
-
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-  const [screenshotAttempts, setScreenshotAttempts] = useState(0)
-  const [devToolsAttempts, setDevToolsAttempts] = useState(0)
-  const [rightClickAttempts, setRightClickAttempts] = useState(0)
-  const [securityViolations, setSecurityViolations] = useState({
-    screenshot: 0,
+  const [violations, setViolations] = useState({
+    tabSwitches: 0,
+    rightClicks: 0,
     devTools: 0,
-    rightClick: 0,
-    print: 0,
+    copyPaste: 0,
+    screenshots: 0,
   })
-  const [showSecurityWarning, setShowSecurityWarning] = useState(false)
-  const [securityViolationType, setSecurityViolationType] = useState<string>("")
-  const [testBlurred, setTestBlurred] = useState(false)
+  const [isBlurred, setIsBlurred] = useState(false)
+  const [showViolationWarning, setShowViolationWarning] = useState(false)
 
-  // Improve the handleSubmit function to properly clean up camera resources
-  const handleSubmit = useCallback(async () => {
-    if (!test || !userId || isSubmitting) return
+  // Refs
+  const timerRef = useRef<NodeJS.Timeout>()
+  const violationTimeoutRef = useRef<NodeJS.Timeout>()
 
+  // Security functions
+  const enterFullscreen = useCallback(async () => {
     try {
-      setIsSubmitting(true)
-
-      // Stop the camera stream FIRST
-      if (videoRef.current && videoRef.current.srcObject) {
-        try {
-          const stream = videoRef.current.srcObject as MediaStream
-          stream.getTracks().forEach((track) => {
-            track.stop()
-            console.log("Camera track stopped successfully")
-          })
-          videoRef.current.srcObject = null
-          setCameraActive(false)
-        } catch (err) {
-          console.error("Error stopping camera:", err)
-        }
-      }
-
-      // Exit fullscreen mode BEFORE submitting
-      if (document.fullscreenElement) {
-        try {
-          await document.exitFullscreen()
-          console.log("Exited fullscreen successfully")
-        } catch (err) {
-          console.error("Error exiting fullscreen:", err)
-        }
-      }
-
-      // Reset permissions and show sidebar
-      setPermissionsGranted(false)
-      setShowSidebar(true)
-
-      const answersRecord: Record<string, number> = {}
-      test.questions.forEach((question, index) => {
-        if (answers[index] !== null) {
-          answersRecord[question.id] = answers[index] as number
-        }
-      })
-
-      const formData = new FormData()
-      formData.append("testId", testId)
-      formData.append("answers", JSON.stringify(answersRecord))
-      formData.append("timeTaken", String(test.duration * 60 - timeLeft))
-      formData.append("startedAt", startTime)
-      formData.append("tabSwitchAttempts", String(tabSwitchAttempts))
-      formData.append("noFaceViolations", String(proctorViolations.noFace))
-      formData.append("multipleFacesViolations", String(proctorViolations.multipleFaces))
-      formData.append("securityViolations", JSON.stringify(securityViolations))
-
-      const result = await submitTestResult(formData)
-
-      if (result.error) {
-        console.error("Error submitting test:", result.error)
-        toast({
-          title: "Failed to submit test",
-          description: result.error,
-          variant: "destructive",
-        })
-        setIsSubmitting(false)
-        return
-      }
-
-      // Navigate to results page
-      router.push(`/user/test-results/${result.resultId}`)
+      await document.documentElement.requestFullscreen()
+      setIsFullscreen(true)
     } catch (err) {
-      console.error("Error submitting test:", err)
-      toast({
-        title: "Failed to submit test",
-        description: "An unexpected error occurred. Please try again.",
-        variant: "destructive",
-      })
-      setIsSubmitting(false)
+      console.error("Failed to enter fullscreen:", err)
+      setError("Please enable fullscreen mode to continue with the test")
     }
-  }, [
-    test,
-    userId,
-    testId,
-    timeLeft,
-    startTime,
-    tabSwitchAttempts,
-    proctorViolations,
-    securityViolations,
-    router,
-    toast,
-    answers,
-    isSubmitting,
-  ])
-
-  const handleProctoringViolation = useCallback(
-    (type: "no_face" | "multiple_faces") => {
-      setViolationType(type)
-
-      // Don't process new violations if the test is already paused
-      if (testPaused) return
-
-      // Pause the test and set pending violation
-      setTestPaused(true)
-      setPendingViolation(type)
-
-      // Store the time when the test was paused
-      pauseStartTimeRef.current = Date.now()
-
-      // Set pause reason based on violation type
-      if (type === "no_face") {
-        setPauseReason("Your face is not visible in the camera frame")
-        setShowFaceWarning(true)
-      } else if (type === "multiple_faces") {
-        setPauseReason("Multiple faces detected in the camera frame")
-        setShowMultipleFacesWarning(true)
-      }
-    },
-    [testPaused],
-  )
-
-  // Handle client-side exceptions
-  const handleClientError = useCallback(
-    (errorMsg: string) => {
-      // Don't process new errors if the test is already paused
-      if (testPaused) return
-
-      console.error("Client-side exception:", errorMsg)
-
-      // Pause the test
-      setTestPaused(true)
-      setPauseReason("A technical issue has been detected")
-      setPendingError(true)
-
-      // Store the time when the test was paused
-      pauseStartTimeRef.current = Date.now()
-
-      // Set error message and show dialog
-      setErrorMessage(errorMsg)
-      setShowErrorDialog(true)
-    },
-    [testPaused],
-  )
-
-  // Handle acknowledging an error and resuming the test
-  const handleErrorAcknowledged = useCallback(() => {
-    // Increment the error count
-    setClientErrors((prev) => prev + 1)
-
-    // Clear pending error
-    setPendingError(false)
-    setShowErrorDialog(false)
-
-    // Calculate pause duration
-    if (pauseStartTimeRef.current) {
-      const pauseDuration = Date.now() - pauseStartTimeRef.current
-      pauseTotalTimeRef.current += pauseDuration
-      pauseStartTimeRef.current = null
-    }
-
-    // Resume the test
-    setTestPaused(false)
-    setPauseReason(null)
   }, [])
 
-  // Handle acknowledging a violation and resuming the test
-  const handleViolationAcknowledged = useCallback(
-    (type: "no_face" | "multiple_faces") => {
-      try {
-        // Only increment the violation count after user acknowledgment
-        if (type === "no_face") {
-          const newNoFaceCount = proctorViolations.noFace + 1
-          setProctoringViolations((prev) => ({ ...prev, noFace: newNoFaceCount }))
-          setShowFaceWarning(false)
-
-          // Auto-submit after MAX_NO_FACE_VIOLATIONS violations
-          if (newNoFaceCount >= MAX_NO_FACE_VIOLATIONS) {
-            toast({
-              title: "Test auto-submitted",
-              description: "Face not detected multiple times. Your test has been automatically submitted.",
-              variant: "destructive",
-            })
-            // Use setTimeout to ensure state updates before submission
-            setTimeout(() => handleSubmit(), 100)
-            return // Don't resume if auto-submitting
-          }
-        } else if (type === "multiple_faces") {
-          const newMultipleFacesCount = proctorViolations.multipleFaces + 1
-          setProctoringViolations((prev) => ({ ...prev, multipleFaces: newMultipleFacesCount }))
-          setShowMultipleFacesWarning(false)
-
-          // Auto-submit after MAX_MULTIPLE_FACES_VIOLATIONS violations
-          if (newMultipleFacesCount >= MAX_MULTIPLE_FACES_VIOLATIONS) {
-            toast({
-              title: "Test auto-submitted",
-              description: "Multiple faces detected. Your test has been automatically submitted.",
-              variant: "destructive",
-            })
-            // Use setTimeout to ensure state updates before submission
-            setTimeout(() => handleSubmit(), 100)
-            return // Don't resume if auto-submitting
-          }
-        }
-
-        // Calculate pause duration
-        if (pauseStartTimeRef.current) {
-          const pauseDuration = Date.now() - pauseStartTimeRef.current
-          pauseTotalTimeRef.current += pauseDuration
-          pauseStartTimeRef.current = null
-        }
-
-        // Resume the test
-        setTestPaused(false)
-        setPauseReason(null)
-        setPendingViolation(null)
-      } catch (err) {
-        console.error("Error handling violation acknowledgment:", err)
-        // Fallback to resume the test even if there's an error
-        setTestPaused(false)
-        setPauseReason(null)
-        setPendingViolation(null)
+  const exitFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
       }
+      setIsFullscreen(false)
+    } catch (err) {
+      console.error("Failed to exit fullscreen:", err)
+    }
+  }, [])
+
+  const handleViolation = useCallback(
+    (type: keyof typeof violations) => {
+      setViolations((prev) => ({
+        ...prev,
+        [type]: prev[type] + 1,
+      }))
+
+      // Show blur effect and warning
+      setIsBlurred(true)
+      setShowViolationWarning(true)
+
+      // Clear previous timeout
+      if (violationTimeoutRef.current) {
+        clearTimeout(violationTimeoutRef.current)
+      }
+
+      // Remove blur after 3 seconds
+      violationTimeoutRef.current = setTimeout(() => {
+        setIsBlurred(false)
+        setShowViolationWarning(false)
+      }, 3000)
+
+      toast({
+        title: "Security Violation Detected",
+        description: `${type} detected. This has been logged.`,
+        variant: "destructive",
+      })
     },
-    [proctorViolations, toast, handleSubmit, MAX_NO_FACE_VIOLATIONS, MAX_MULTIPLE_FACES_VIOLATIONS],
+    [toast],
   )
 
-  // Set up global error handler
+  // Security event listeners
   useEffect(() => {
-    if (!permissionsGranted) return
-
-    // Global error handler for uncaught exceptions
-    const handleGlobalError = (event: ErrorEvent) => {
-      event.preventDefault()
-      handleClientError(`An error occurred: ${event.message}`)
-      return true // Prevent default error handling
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleViolation("tabSwitches")
+      }
     }
 
-    // Global unhandled promise rejection handler
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      event.preventDefault()
-      handleClientError(`A promise rejection occurred: ${event.reason}`)
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+      handleViolation("rightClicks")
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent F12, Ctrl+Shift+I, Ctrl+U, etc.
+      if (
+        e.key === "F12" ||
+        (e.ctrlKey && e.shiftKey && e.key === "I") ||
+        (e.ctrlKey && e.shiftKey && e.key === "C") ||
+        (e.ctrlKey && e.key === "u") ||
+        (e.ctrlKey && e.key === "c") ||
+        (e.ctrlKey && e.key === "v") ||
+        (e.ctrlKey && e.key === "x")
+      ) {
+        e.preventDefault()
+        if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+          handleViolation("devTools")
+        } else if (e.ctrlKey && (e.key === "c" || e.key === "v" || e.key === "x")) {
+          handleViolation("copyPaste")
+        }
+      }
+    }
+
+    const handlePrintScreen = (e: KeyboardEvent) => {
+      if (e.key === "PrintScreen") {
+        e.preventDefault()
+        handleViolation("screenshots")
+      }
+    }
+
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+      if (!document.fullscreenElement && test) {
+        handleViolation("tabSwitches")
+      }
     }
 
     // Add event listeners
-    window.addEventListener("error", handleGlobalError)
-    window.addEventListener("unhandledrejection", handleUnhandledRejection)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    document.addEventListener("contextmenu", handleContextMenu)
+    document.addEventListener("keydown", handleKeyDown)
+    document.addEventListener("keyup", handlePrintScreen)
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
 
-    // Clean up
+    // Disable text selection
+    document.body.style.userSelect = "none"
+    document.body.style.webkitUserSelect = "none"
+
     return () => {
-      window.removeEventListener("error", handleGlobalError)
-      window.removeEventListener("unhandledrejection", handleUnhandledRejection)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      document.removeEventListener("contextmenu", handleContextMenu)
+      document.removeEventListener("keydown", handleKeyDown)
+      document.removeEventListener("keyup", handlePrintScreen)
+      document.removeEventListener("fullscreenchange", handleFullscreenChange)
+      document.body.style.userSelect = ""
+      document.body.style.webkitUserSelect = ""
     }
-  }, [permissionsGranted, handleClientError])
+  }, [handleViolation, test])
 
+  // Fetch test data
   useEffect(() => {
-    // Get the current user ID from cookies
-    const cookies = document.cookie.split("; ")
-    const userIdCookie = cookies.find((cookie) => cookie.startsWith("user_id="))
-    const currentUserId = userIdCookie ? userIdCookie.split("=")[1] : null
-
-    // Get username from cookies if available
-    const userNameCookie = cookies.find((cookie) => cookie.startsWith("user_name="))
-    const currentUserName = userNameCookie ? userNameCookie.split("=")[1] : null
-
-    if (currentUserName) {
-      setUserName(decodeURIComponent(currentUserName))
-    }
-
-    if (!currentUserId) {
-      setError("User ID not found. Please log in again.")
-      setLoading(false)
-      return
-    }
-
-    setUserId(currentUserId)
-
     const fetchTest = async () => {
       try {
-        setLoading(true)
-        setError(null)
-
-        // Updated API call - remove userId from query params since it's read from cookies
-        const testResponse = await fetch(`/api/user/test?testId=${testId}`)
-
-        if (!testResponse.ok) {
-          const errorData = await testResponse.json().catch(() => ({}))
-
-          if (testResponse.status === 401) {
-            setError("Authentication failed. Please log in again.")
-            // Redirect to login after a short delay
-            setTimeout(() => {
-              window.location.href = "/login"
-            }, 2000)
-          } else if (testResponse.status === 403) {
-            setError("You are not authorized to access this test. This test has not been assigned to you.")
-          } else {
-            setError(errorData.error || `Failed to fetch test: ${testResponse.statusText}`)
-          }
-          setLoading(false)
-          return
+        const response = await fetch(`/api/user/test/${testId}`)
+        if (!response.ok) {
+          throw new Error("Failed to fetch test")
         }
 
-        const testData = await testResponse.json()
+        const data = await response.json()
+        setTest(data.test)
+        setQuestions(data.questions)
+        setTimeRemaining(data.test.duration * 60) // Convert minutes to seconds
+        setUserEmail(data.userEmail || "user@example.com")
+        setLoading(false)
 
-        if (testData.error) {
-          if (testData.error.includes("not assigned") || testData.error.includes("not authorized")) {
-            setError("You are not authorized to access this test. This test has not been assigned to you.")
-          } else if (testData.error.includes("already completed")) {
-            setError("You have already completed this test.")
-          } else {
-            setError(testData.error)
-          }
-          setLoading(false)
-          return
-        }
-
-        if (!testData.test) {
-          setError("Test not found or not assigned to you")
-          setLoading(false)
-          return
-        }
-
-        // Set test data with questions included
-        const testWithQuestions = {
-          ...testData.test,
-          questions: testData.test.questions || [],
-        }
-
-        setTest(testWithQuestions)
-        setTimeLeft(testWithQuestions.duration * 60)
-        setAnswers(new Array(testWithQuestions.questions.length).fill(null))
-        setMarkedForReview(new Array(testWithQuestions.questions.length).fill(false))
-
-        console.log("Test loaded successfully:", testWithQuestions.title)
+        // Enter fullscreen after loading
+        setTimeout(() => {
+          enterFullscreen()
+        }, 1000)
       } catch (err) {
         console.error("Error fetching test:", err)
-        setError("Failed to load test. Please check your internet connection and try again.")
-      } finally {
+        setError("Failed to load test")
         setLoading(false)
       }
     }
 
-    fetchTest()
-  }, [testId])
-
-  // Timer effect - properly handles pausing
-  useEffect(() => {
-    if (!test || !permissionsGranted) return
-
-    // Clear any existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
+    if (testId) {
+      fetchTest()
     }
+  }, [testId, enterFullscreen])
 
-    // Only run the timer when the test is not paused
-    if (!testPaused) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            if (timerRef.current) clearInterval(timerRef.current)
-            setIsTimeUpDialogOpen(true)
-            return 0
-          }
-          return prev - 1
-        })
+  // Timer effect
+  useEffect(() => {
+    if (timeRemaining > 0 && !loading) {
+      timerRef.current = setTimeout(() => {
+        setTimeRemaining((prev) => prev - 1)
       }, 1000)
+    } else if (timeRemaining === 0 && !loading) {
+      handleSubmitTest()
     }
 
     return () => {
       if (timerRef.current) {
-        clearInterval(timerRef.current)
+        clearTimeout(timerRef.current)
       }
     }
-  }, [test, permissionsGranted, testPaused])
+  }, [timeRemaining, loading])
 
-  useEffect(() => {
-    if (permissionsGranted) {
-      // Hide sidebar and enter fullscreen when test starts
-      setShowSidebar(false)
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch((err) => {
-          console.error("Failed to enter fullscreen:", err)
-          toast({
-            title: "Fullscreen Required",
-            description: "Failed to enter fullscreen mode. Please enable fullscreen to continue.",
-            variant: "destructive",
-          })
-        })
-      }
+  const handleAnswerSelect = (questionId: string, answerIndex: number) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [questionId]: answerIndex,
+    }))
+  }
+
+  const handleNextQuestion = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex((prev) => prev + 1)
     }
-  }, [permissionsGranted, toast])
+  }
 
-  useEffect(() => {
-    if (!permissionsGranted) return
-
-    // Handle tab visibility change
-    const handleVisibilityChange = () => {
-      const isVisible = document.visibilityState === "visible"
-      setIsTabVisible(isVisible)
-
-      if (!isVisible && permissionsGranted) {
-        // User switched tabs or minimized window
-        const newAttempts = tabSwitchAttempts + 1
-        setTabSwitchAttempts(newAttempts)
-        setShowTabWarning(true)
-        setObscureContent(true) // Obscure the test content
-
-        // Log the attempt
-        console.log("Tab switch attempt detected")
-
-        // Auto-submit after MAX_TAB_SWITCH_VIOLATIONS attempts
-        if (newAttempts >= MAX_TAB_SWITCH_VIOLATIONS) {
-          toast({
-            title: "Test auto-submitted",
-            description: "Multiple tab switching violations detected. Your test has been automatically submitted.",
-            variant: "destructive",
-          })
-          setTimeout(() => handleSubmit(), 100)
-        }
-      } else {
-        setObscureContent(false) // Restore the test content
-      }
+  const handlePreviousQuestion = () => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex((prev) => prev - 1)
     }
+  }
 
-    // Handle before unload (page refresh or close)
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (permissionsGranted) {
-        e.preventDefault()
-        e.returnValue = "Are you sure you want to leave? Your test progress will be lost."
-        return e.returnValue
-      }
-    }
+  const handleSubmitTest = async () => {
+    setSubmitting(true)
 
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    window.addEventListener("beforeunload", handleBeforeUnload)
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-    }
-  }, [permissionsGranted, tabSwitchAttempts, handleSubmit, toast, MAX_TAB_SWITCH_VIOLATIONS])
-
-  useEffect(() => {
-    // Prevent exiting fullscreen and handle fullscreen changes
-    const handleFullscreenChange = () => {
-      const isCurrentlyFullscreen = !!document.fullscreenElement
-      setIsFullscreen(isCurrentlyFullscreen)
-      if (permissionsGranted && !isCurrentlyFullscreen) {
-        // Show warning if fullscreen is exited
-        setFullscreenWarning(true)
-      }
-    }
-
-    // Prevent F11 and Esc key actions
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "F11" || event.key === "Escape") {
-        event.preventDefault()
-        if (permissionsGranted) {
-          setFullscreenWarning(true)
-        }
-      }
-    }
-
-    // Prevent copying
-    const handleCopy = (event: Event) => {
-      event.preventDefault()
-      toast({
-        title: "Copying Disabled",
-        description: "Copying is not allowed during the test.",
-        variant: "destructive",
+    try {
+      const response = await fetch(`/api/user/test/${testId}/submit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          answers,
+          violations,
+          timeSpent: test.duration * 60 - timeRemaining,
+        }),
       })
-    }
 
-    // Prevent context menu (right-click)
-    const handleContextMenu = (event: Event) => {
-      event.preventDefault()
-    }
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-    document.addEventListener("keydown", handleKeyDown)
-    document.addEventListener("copy", handleCopy)
-    document.addEventListener("contextmenu", handleContextMenu)
-
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
-      document.removeEventListener("keydown", handleKeyDown)
-      document.removeEventListener("copy", handleCopy)
-      document.removeEventListener("contextmenu", handleContextMenu)
-    }
-  }, [permissionsGranted, toast])
-
-  // Initialize camera when permissions are granted
-  useEffect(() => {
-    let cameraStream: MediaStream | null = null
-
-    if (permissionsGranted && videoRef.current) {
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: false })
-        .then((stream) => {
-          cameraStream = stream
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream
-            setCameraActive(true)
-          }
-        })
-        .catch((err) => {
-          console.error("Error accessing camera:", err)
-          toast({
-            title: "Camera Error",
-            description: "Failed to access camera. Please check your permissions.",
-            variant: "destructive",
-          })
-        })
-    }
-
-    return () => {
-      // Clean up camera stream when component unmounts or permissions change
-      if (cameraStream) {
-        cameraStream.getTracks().forEach((track) => {
-          track.stop()
-          console.log("Camera track stopped on cleanup")
-        })
+      if (!response.ok) {
+        throw new Error("Failed to submit test")
       }
 
-      if (videoRef.current && videoRef.current.srcObject) {
-        try {
-          const stream = videoRef.current.srcObject as MediaStream
-          stream.getTracks().forEach((track) => {
-            track.stop()
-            console.log("Camera track stopped from videoRef on cleanup")
-          })
-          videoRef.current.srcObject = null
-        } catch (err) {
-          console.error("Error stopping camera stream:", err)
-        }
-      }
+      const result = await response.json()
+
+      // Exit fullscreen before redirecting
+      await exitFullscreen()
+
+      toast({
+        title: "Test Submitted Successfully",
+        description: `Your score: ${result.score}/${questions.length}`,
+      })
+
+      router.push(`/user/test-results/${result.resultId}`)
+    } catch (err) {
+      console.error("Error submitting test:", err)
+      setError("Failed to submit test")
+      setSubmitting(false)
     }
-  }, [permissionsGranted, toast])
-
-  // Enhanced security measures
-  useEffect(() => {
-    if (!permissionsGranted) return
-
-    // Get user email from cookies
-    const cookies = document.cookie.split("; ")
-    const emailCookie = cookies.find((cookie) => cookie.startsWith("user_email="))
-    const currentUserEmail = emailCookie ? decodeURIComponent(emailCookie.split("=")[1]) : null
-    setUserEmail(currentUserEmail)
-
-    // Disable text selection and right-click
-    document.body.style.userSelect = "none"
-    document.body.style.webkitUserSelect = "none"
-    document.body.style.mozUserSelect = "none"
-    document.body.style.msUserSelect = "none"
-
-    // Prevent screenshot attempts
-    const preventScreenshot = (e: KeyboardEvent) => {
-      // Print Screen key
-      if (e.key === "PrintScreen") {
-        e.preventDefault()
-        setScreenshotAttempts((prev) => prev + 1)
-        setSecurityViolations((prev) => ({ ...prev, screenshot: prev.screenshot + 1 }))
-        setSecurityViolationType("screenshot")
-        setShowSecurityWarning(true)
-      }
-
-      // Common screenshot shortcuts
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "S" || e.key === "3" || e.key === "4")) {
-        e.preventDefault()
-        setScreenshotAttempts((prev) => prev + 1)
-        setSecurityViolations((prev) => ({ ...prev, screenshot: prev.screenshot + 1 }))
-        setSecurityViolationType("screenshot")
-        setShowSecurityWarning(true)
-      }
-
-      // Prevent developer tools
-      if (
-        e.key === "F12" ||
-        (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) ||
-        (e.ctrlKey && e.key === "U")
-      ) {
-        e.preventDefault()
-        setDevToolsAttempts((prev) => prev + 1)
-        setSecurityViolations((prev) => ({ ...prev, devTools: prev.devTools + 1 }))
-        setSecurityViolationType("developer tools")
-        setShowSecurityWarning(true)
-      }
-
-      // Prevent printing
-      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
-        e.preventDefault()
-        setSecurityViolations((prev) => ({ ...prev, print: prev.print + 1 }))
-        setSecurityViolationType("printing")
-        setShowSecurityWarning(true)
-      }
-    }
-
-    // Prevent right-click context menu
-    const preventRightClick = (e: MouseEvent) => {
-      e.preventDefault()
-      setRightClickAttempts((prev) => prev + 1)
-      setSecurityViolations((prev) => ({ ...prev, rightClick: prev.rightClick + 1 }))
-      setSecurityViolationType("right-click menu")
-      setShowSecurityWarning(true)
-    }
-
-    // Detect developer tools opening
-    const devtools = {
-      open: false,
-      orientation: null,
-    }
-
-    const threshold = 160
-
-    const detectDevTools = () => {
-      if (window.outerHeight - window.innerHeight > threshold || window.outerWidth - window.innerWidth > threshold) {
-        if (!devtools.open) {
-          devtools.open = true
-          setDevToolsAttempts((prev) => prev + 1)
-          setSecurityViolations((prev) => ({ ...prev, devTools: prev.devTools + 1 }))
-          setSecurityViolationType("developer tools")
-          setShowSecurityWarning(true)
-        }
-      } else {
-        devtools.open = false
-      }
-    }
-
-    // Blur content when security violations occur
-    const blurContent = () => {
-      setTestBlurred(true)
-      setTimeout(() => setTestBlurred(false), 3000) // Blur for 3 seconds
-    }
-
-    // Add event listeners
-    document.addEventListener("keydown", preventScreenshot)
-    document.addEventListener("contextmenu", preventRightClick)
-    window.addEventListener("resize", detectDevTools)
-
-    // Check for dev tools every 500ms
-    const devToolsInterval = setInterval(detectDevTools, 500)
-
-    // Disable drag and drop
-    const preventDragDrop = (e: DragEvent) => {
-      e.preventDefault()
-    }
-
-    document.addEventListener("dragstart", preventDragDrop)
-    document.addEventListener("drop", preventDragDrop)
-
-    return () => {
-      document.removeEventListener("keydown", preventScreenshot)
-      document.removeEventListener("contextmenu", preventRightClick)
-      document.removeEventListener("dragstart", preventDragDrop)
-      document.removeEventListener("drop", preventDragDrop)
-      window.removeEventListener("resize", detectDevTools)
-      clearInterval(devToolsInterval)
-
-      // Reset styles
-      document.body.style.userSelect = ""
-      document.body.style.webkitUserSelect = ""
-      document.body.style.mozUserSelect = ""
-      document.body.style.msUserSelect = ""
-    }
-  }, [permissionsGranted])
+  }
 
   const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600)
-    const mins = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
-    return {
-      hours: hours.toString().padStart(2, "0"),
-      minutes: mins.toString().padStart(2, "0"),
-      seconds: secs.toString().padStart(2, "0"),
-    }
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`
   }
 
-  const handleAnswerSelect = (questionIndex: number, optionIndex: number) => {
-    // Prevent interaction if test is paused
-    if (testPaused) return
-
-    const newAnswers = [...answers]
-    newAnswers[questionIndex] = optionIndex
-    setAnswers(newAnswers)
-  }
-
-  const handleMarkForReview = () => {
-    // Prevent interaction if test is paused
-    if (testPaused) return
-
-    const newMarkedForReview = [...markedForReview]
-    newMarkedForReview[currentQuestion] = !newMarkedForReview[currentQuestion]
-    setMarkedForReview(newMarkedForReview)
-  }
-
-  const handleNext = () => {
-    // Prevent interaction if test is paused
-    if (testPaused) return
-
-    if (test && currentQuestion < test.questions.length - 1) {
-      setCurrentQuestion(currentQuestion + 1)
-    }
-  }
-
-  const handlePrevious = () => {
-    // Prevent interaction if test is paused
-    if (testPaused) return
-
-    if (currentQuestion > 0) {
-      setCurrentQuestion(currentQuestion - 1)
-    }
-  }
-
-  const handleQuestionChange = (index: number) => {
-    // Prevent interaction if test is paused
-    if (testPaused) return
-
-    setCurrentQuestion(index)
-  }
-
-  // Handle continuing test after fullscreen warning
-  const handleContinueTest = () => {
-    setFullscreenWarning(false)
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.error("Failed to re-enter fullscreen:", err)
-        toast({
-          title: "Fullscreen Required",
-          description: "Failed to enter fullscreen mode. Please enable fullscreen to continue.",
-          variant: "destructive",
-        })
-      })
-    }
-  }
-
-  // Handle guidelines acknowledgment
-  const handleGuidelinesAcknowledged = () => {
-    setShowGuidelines(false)
-    setPermissionsGranted(true)
-  }
+  const currentQuestion = questions[currentQuestionIndex]
+  const progress = ((currentQuestionIndex + 1) / questions.length) * 100
 
   if (loading) {
     return (
-      <DashboardLayout requiredRole="user">
-        <div className="flex justify-center py-12">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-200 border-t-purple-700"></div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading test...</p>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
-  if (error || !test) {
+  if (error) {
     return (
-      <DashboardLayout requiredRole="user">
-        <Alert variant="destructive" className="mb-4">
+      <div className="min-h-screen flex items-center justify-center">
+        <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error || "Test not found"}</AlertDescription>
+          <AlertDescription>{error}</AlertDescription>
         </Alert>
-        <Button asChild className="mt-4">
-          <Link href="/user/active-tests">Back to Active Tests</Link>
-        </Button>
-      </DashboardLayout>
+      </div>
     )
   }
-
-  const progress = ((currentQuestion + 1) / test.questions.length) * 100
-  const answeredCount = answers.filter((a) => a !== null).length
-  const question = test.questions[currentQuestion]
-  const time = formatTime(timeLeft)
 
   return (
-    <DashboardLayout requiredRole="user" className={isFullscreen ? "ml-0" : ""}>
-      {!permissionsGranted && !showGuidelines ? (
-        <PermissionRequest onPermissionsGranted={() => setShowGuidelines(true)} />
-      ) : showGuidelines ? (
-        <AlertDialog open={showGuidelines} onOpenChange={setShowGuidelines}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Test Guidelines</AlertDialogTitle>
-              <AlertDialogDescription>
-                Please read the following guidelines before starting the test:
-                <ul className="list-disc pl-5 mt-2">
-                  <li>Ensure you are in a quiet, well-lit environment.</li>
-                  <li>The test must be taken in fullscreen mode. Attempting to exit fullscreen is not allowed.</li>
-                  <li>Copying or using external resources is prohibited.</li>
-                  <li>Your webcam must remain active for proctoring purposes.</li>
-                  <li>AI proctoring will monitor your presence during the test.</li>
-                  <li>Your face must be visible in the camera at all times.</li>
-                  <li>Only one person (you) should be visible in the camera frame.</li>
-                  <li>
-                    The test duration is {test.duration} minutes. Unanswered questions will be marked as incorrect.
-                  </li>
-                  <li>
-                    The test will pause if any violations or technical issues are detected, and you must acknowledge
-                    them to continue.
-                  </li>
-                  <li>Click "Understood" to start the test.</li>
-                </ul>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogAction
-                onClick={handleGuidelinesAcknowledged}
-                className="bg-purple-700 hover:bg-purple-800 text-white"
-              >
-                Understood
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : (
-        <div className="flex">
-          {/* Main Content */}
-          <div
-            className={`flex-1 space-y-6 p-4 mr-64 transition-opacity duration-300 ${
-              obscureContent || testPaused ? "opacity-20 pointer-events-none" : "opacity-100"
-            }`}
-            style={{ userSelect: "none" }}
-          >
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold text-gray-800">{test.title}</h1>
-              <div className="flex items-center gap-2 text-gray-800">
-                <span>Time Left</span>
-                <span className="font-mono text-lg font-medium">
-                  {time.hours}:{time.minutes}:{time.seconds}
-                </span>
-              </div>
-            </div>
+    <div className={`min-h-screen bg-gray-50 ${isBlurred ? "blur-sm" : ""}`}>
+      <WatermarkOverlay userEmail={userEmail} />
 
-            <div className="flex items-center justify-between text-sm text-gray-600">
-              <div>Question {currentQuestion + 1}</div>
-            </div>
-
-            <Progress value={progress} className="h-2 bg-gray-200" indicatorClassName="bg-blue-500" />
-
-            {/* Question Card with Watermark */}
-            <div className="relative">
-              {userEmail && (
-                <WatermarkOverlay userEmail={userEmail} testId={testId} className={testBlurred ? "blur-sm" : ""} />
-              )}
-
-              <div className={`transition-all duration-300 ${testBlurred ? "blur-sm" : ""}`}>
-                {question.type === "multiple_choice" ? (
-                  <Card className="border-gray-200 max-h-[60vh] overflow-y-auto">
-                    <CardHeader>
-                      <CardTitle className="text-lg text-gray-800 flex items-center gap-2">
-                        Question {currentQuestion + 1}
-                        <span className="text-sm font-normal text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                          Multiple Choice
-                        </span>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <p className="text-gray-700">{question.text}</p>
-                        {question.options.map((option, index) => (
-                          <div
-                            key={index}
-                            className={`flex items-center rounded-md border p-3 cursor-pointer transition-colors ${
-                              answers[currentQuestion] === index
-                                ? "border-blue-500 bg-blue-50"
-                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                            } ${testPaused ? "opacity-50 pointer-events-none" : ""}`}
-                            onClick={() => handleAnswerSelect(currentQuestion, index)}
-                          >
-                            <div
-                              className={`mr-3 flex h-5 w-5 items-center justify-center rounded-sm border ${
-                                answers[currentQuestion] === index ? "border-blue-500 bg-blue-500" : "border-gray-300"
-                              }`}
-                            >
-                              {answers[currentQuestion] === index && <CheckCircle className="h-4 w-4 text-white" />}
-                            </div>
-                            <span>{option}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <ProgrammingQuestion
-                    question={question}
-                    currentAnswer={answers[currentQuestion]}
-                    onAnswerSelect={(optionIndex) => handleAnswerSelect(currentQuestion, optionIndex)}
-                    questionNumber={currentQuestion + 1}
-                    isDisabled={testPaused}
-                  />
-                )}
-              </div>
-            </div>
-
-            {/* Navigation Buttons */}
-            <div className="flex justify-between items-center mt-4">
-              <div className="flex gap-3">
-                <Button
-                  onClick={handleMarkForReview}
-                  disabled={testPaused}
-                  className={`rounded-full px-6 py-2 text-white ${
-                    markedForReview[currentQuestion] ? "bg-gray-500" : "bg-red-500 hover:bg-red-600"
-                  }`}
-                >
-                  Mark for Review
-                </Button>
-                <Button
-                  onClick={handlePrevious}
-                  disabled={currentQuestion === 0 || testPaused}
-                  className="rounded-full px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white"
-                >
-                  Previous
-                </Button>
-                <Button
-                  onClick={handleNext}
-                  disabled={currentQuestion === test.questions.length - 1 || testPaused}
-                  className="rounded-full px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white"
-                >
-                  Next
-                </Button>
-              </div>
-              <Button
-                onClick={() => setIsSubmitDialogOpen(true)}
-                disabled={testPaused || isSubmitting}
-                className="rounded-full px-6 py-2 bg-green-500 hover:bg-green-600 text-white"
-              >
-                Submit Test
-              </Button>
-            </div>
-
-            {/* Legend */}
-            <div className="flex gap-4 text-sm text-gray-600 mt-2">
-              <div className="flex items-center gap-1">
-                <div className="h-4 w-4 rounded-full bg-blue-500"></div>
-                <span>Current</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="h-4 w-4 rounded-full bg-white border border-gray-300"></div>
-                <span>Not Attempted</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="h-4 w-4 rounded-full bg-green-500"></div>
-                <span>Answered</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="h-4 w-4 rounded-full bg-orange-500"></div>
-                <span>Not Answered</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="h-4 w-4 rounded-full bg-gray-500"></div>
-                <span>Review</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Sidebar with Questions and Video */}
-          <div className="fixed top-0 right-0 w-64 h-screen bg-gray-100 border-l border-gray-200 overflow-y-auto p-4">
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">Questions</h3>
-              <div className="grid grid-cols-5 gap-2">
-                {test.questions.map((_, idx) => {
-                  const isCurrent = idx === currentQuestion
-                  const isAnswered = answers[idx] !== null
-                  const isMarkedForReview = markedForReview[idx]
-                  let bgColor = "bg-white border border-gray-300" // Not Attempted
-                  if (isMarkedForReview)
-                    bgColor = "bg-gray-500 text-white" // Review
-                  else if (isCurrent)
-                    bgColor = "bg-blue-500 text-white" // Current
-                  else if (isAnswered)
-                    bgColor = "bg-green-500 text-white" // Answered
-                  else if (answers[idx] === null) bgColor = "bg-orange-500 text-white" // Not Answered
-
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleQuestionChange(idx)}
-                      disabled={testPaused}
-                      className={`h-10 w-10 flex items-center justify-center rounded-md ${bgColor} hover:bg-opacity-80 transition-colors ${testPaused ? "opacity-50 cursor-not-allowed" : ""}`}
-                    >
-                      {idx + 1}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Video Feed */}
-              <div className="mt-4 relative">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  muted
-                  className={`border border-gray-300 rounded-md w-full h-32 object-cover ${!cameraActive ? "bg-gray-800" : ""}`}
-                />
-
-                {!cameraActive && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gray-800 bg-opacity-80 text-white rounded-md">
-                    <p className="text-sm font-medium">Camera disabled</p>
-                  </div>
-                )}
-
-                <AIProctoring
-                  videoRef={videoRef}
-                  onViolation={handleProctoringViolation}
-                  isActive={permissionsGranted && cameraActive}
-                  userName={userName || undefined}
-                />
-              </div>
-
-              {/* Test Paused Indicator */}
-              {testPaused && (
-                <div className="mt-4 bg-yellow-100 border border-yellow-300 rounded-md p-3">
-                  <div className="flex items-center gap-2 text-yellow-800 font-medium mb-2">
-                    <Clock className="h-5 w-5" />
-                    <span>Test Paused</span>
-                  </div>
-                  <p className="text-sm text-yellow-700">
-                    {pauseReason || "The test has been paused. Please address the issue to continue."}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+      {showViolationWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <Alert variant="destructive" className="max-w-md">
+            <Shield className="h-4 w-4" />
+            <AlertDescription>Security violation detected! This action has been logged.</AlertDescription>
+          </Alert>
         </div>
       )}
 
-      {/* Fullscreen Warning Dialog */}
-      <AlertDialog open={fullscreenWarning} onOpenChange={setFullscreenWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Warning: Fullscreen Required</AlertDialogTitle>
-            <AlertDialogDescription>
-              The test must be taken in fullscreen mode. Attempting to exit fullscreen is not allowed. Please continue
-              in fullscreen mode.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={handleContinueTest} className="bg-purple-700 hover:bg-purple-800 text-white">
-              Continue Test
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {!isFullscreen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-75">
+          <Card className="max-w-md">
+            <CardHeader>
+              <CardTitle className="text-center text-red-600">Fullscreen Required</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <p className="mb-4">Please enable fullscreen mode to continue with the test.</p>
+              <Button onClick={enterFullscreen} className="bg-purple-600 hover:bg-purple-700">
+                Enter Fullscreen
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      {/* Submit Test Dialog */}
-      <AlertDialog open={isSubmitDialogOpen} onOpenChange={setIsSubmitDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Submit Test</AlertDialogTitle>
-            <AlertDialogDescription>
-              {answeredCount < test.questions.length ? (
-                <>
-                  You have {test.questions.length - answeredCount} unanswered questions. Are you sure you want to submit
-                  the test? You won't be able to change your answers after submission.
-                </>
-              ) : (
-                <>
-                  Are you sure you want to submit the test? You won't be able to change your answers after submission.
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-purple-200 text-purple-700">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                // Stop camera before submitting
-                if (videoRef.current && videoRef.current.srcObject) {
-                  try {
-                    const stream = videoRef.current.srcObject as MediaStream
-                    stream.getTracks().forEach((track) => track.stop())
-                    videoRef.current.srcObject = null
-                    setCameraActive(false)
-                  } catch (err) {
-                    console.error("Error stopping camera on submit:", err)
-                  }
-                }
+      <div className="container mx-auto px-4 py-6">
+        {/* Header */}
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-purple-800">{test?.title}</h1>
+            <p className="text-gray-600">{test?.topic}</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-red-600">
+              <Clock className="h-5 w-5" />
+              <span className="font-mono text-lg">{formatTime(timeRemaining)}</span>
+            </div>
+            <div className="text-sm text-gray-500">
+              Violations: {Object.values(violations).reduce((a, b) => a + b, 0)}
+            </div>
+          </div>
+        </div>
 
-                handleSubmit()
-                setShowSidebar(true) // Show sidebar after submission
-                setPermissionsGranted(false) // Reset permissions after submission
-              }}
-              className="bg-purple-700 hover:bg-purple-800 text-white"
-            >
-              Submit Test
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        {/* Progress */}
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-sm text-gray-600">
+              Question {currentQuestionIndex + 1} of {questions.length}
+            </span>
+            <span className="text-sm text-gray-600">{Math.round(progress)}% Complete</span>
+          </div>
+          <Progress value={progress} className="h-2" />
+        </div>
 
-      {/* Time Up Dialog */}
-      <AlertDialog open={isTimeUpDialogOpen} onOpenChange={setIsTimeUpDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Time's Up!</AlertDialogTitle>
-            <AlertDialogDescription>
-              Your time for this test has expired. Your answers will be automatically submitted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                // Stop camera before submitting
-                if (videoRef.current && videoRef.current.srcObject) {
-                  try {
-                    const stream = videoRef.current.srcObject as MediaStream
-                    stream.getTracks().forEach((track) => track.stop())
-                    videoRef.current.srcObject = null
-                    setCameraActive(false)
-                  } catch (err) {
-                    console.error("Error stopping camera on time up:", err)
-                  }
-                }
-
-                handleSubmit()
-                setShowSidebar(true) // Show sidebar after time's up submission
-                setPermissionsGranted(false) // Reset permissions after time's up submission
-              }}
-              className="bg-purple-700 hover:bg-purple-800 text-white"
-            >
-              View Results
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Tab Switch Warning Dialog */}
-      <AlertDialog open={showTabWarning} onOpenChange={setShowTabWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Warning: Tab Switching Detected</AlertDialogTitle>
-            <AlertDialogDescription>
-              You have switched away from the test tab. This activity is monitored and may be flagged as a violation of
-              test rules.
-              {tabSwitchAttempts > 1 && (
-                <p className="mt-2 font-semibold text-red-600">
-                  This is your {tabSwitchAttempts}
-                  {tabSwitchAttempts === 2 ? "nd" : tabSwitchAttempts === 3 ? "rd" : "th"} violation. Multiple
-                  violations may result in automatic test submission or disqualification.
-                </p>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                setShowTabWarning(false)
-                setObscureContent(false) // Restore the test content
-                // Re-enter fullscreen if needed
-                if (!document.fullscreenElement) {
-                  document.documentElement.requestFullscreen().catch((err) => {
-                    console.error("Failed to re-enter fullscreen:", err)
-                  })
-                }
-              }}
-              className="bg-purple-700 hover:bg-purple-800 text-white"
-            >
-              Return to Test
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Face Not Detected Warning Dialog */}
-      <AlertDialog open={showFaceWarning} onOpenChange={setShowFaceWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Warning: Face Not Detected</AlertDialogTitle>
-            <AlertDialogDescription>
-              Your face is not visible in the camera frame. Please ensure your face is clearly visible throughout the
-              test.
-              {proctorViolations.noFace > 0 && (
-                <p className="mt-2 font-semibold text-red-600">
-                  This is your {proctorViolations.noFace + 1}
-                  {proctorViolations.noFace === 0
-                    ? "st"
-                    : proctorViolations.noFace === 1
-                      ? "nd"
-                      : proctorViolations.noFace === 2
-                        ? "rd"
-                        : "th"}{" "}
-                  violation. Multiple violations may result in automatic test submission.
-                </p>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                if (pendingViolation === "no_face") {
-                  handleViolationAcknowledged("no_face")
-                } else {
-                  setShowFaceWarning(false)
-                }
-              }}
-              className="bg-purple-700 hover:bg-purple-800 text-white"
-            >
-              I Understand
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Multiple Faces Warning Dialog */}
-      <AlertDialog open={showMultipleFacesWarning} onOpenChange={setShowMultipleFacesWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Warning: Multiple Faces Detected</AlertDialogTitle>
-            <AlertDialogDescription>
-              Multiple faces have been detected in the camera frame. Only the test taker should be visible during the
-              test. This is a serious violation of test integrity and may result in immediate test submission.
-              {proctorViolations.multipleFaces > 0 && (
-                <p className="mt-2 font-semibold text-red-600">
-                  This is your {proctorViolations.multipleFaces + 1}
-                  {proctorViolations.multipleFaces === 0 ? "st" : "nd"} violation. Another violation will result in
-                  automatic test submission.
-                </p>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                if (pendingViolation === "multiple_faces") {
-                  handleViolationAcknowledged("multiple_faces")
-                } else {
-                  setShowMultipleFacesWarning(false)
-                }
-              }}
-              className="bg-purple-700 hover:bg-purple-800 text-white"
-            >
-              I Understand
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Client-side Error Dialog */}
-      <AlertDialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Technical Issue Detected
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              A technical issue has been detected in the test environment. The test has been paused to protect your
-              progress.
-              <div className="mt-2 p-3 bg-gray-100 rounded-md text-sm font-mono overflow-x-auto">
-                {errorMessage || "Unknown error"}
+        {/* Question */}
+        {currentQuestion && (
+          <Card className="mb-6">
+            <CardHeader>
+              <div className="flex items-center gap-2 mb-2">
+                <QuestionTypeIcon type={currentQuestion.type} />
+                <span className="text-sm font-medium capitalize text-gray-600">
+                  {currentQuestion.type?.replace("_", " ")} Question
+                </span>
+                <span className="text-xs px-2 py-1 bg-gray-100 rounded-full">{currentQuestion.difficulty}</span>
               </div>
-              {clientErrors > 0 && (
-                <p className="mt-2 font-medium text-amber-600">
-                  This is the {clientErrors + 1}
-                  {clientErrors === 0 ? "st" : clientErrors === 1 ? "nd" : clientErrors === 2 ? "rd" : "th"} technical
-                  issue detected.
-                </p>
-              )}
-              <p className="mt-2">
-                Click "Continue Test" to resume. If you continue to experience issues, please contact support.
-              </p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                if (pendingError) {
-                  handleErrorAcknowledged()
-                } else {
-                  setShowErrorDialog(false)
-                }
-              }}
-              className="bg-purple-700 hover:bg-purple-800 text-white"
-            >
-              Continue Test
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Security Violation Warning Dialog */}
-      <AlertDialog open={showSecurityWarning} onOpenChange={setShowSecurityWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
-              <Shield className="h-5 w-5" />
-              Security Violation Detected
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              An attempt to use {securityViolationType} has been detected. This action is not allowed during the test
-              and has been logged.
-              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
-                <div className="text-sm text-red-800">
-                  <p>
-                    <strong>Current Violations:</strong>
-                  </p>
-                  <ul className="list-disc list-inside mt-1 space-y-1">
-                    <li>Screenshots: {securityViolations.screenshot}</li>
-                    <li>Developer Tools: {securityViolations.devTools}</li>
-                    <li>Right-click Menu: {securityViolations.rightClick}</li>
-                    <li>Print Attempts: {securityViolations.print}</li>
-                  </ul>
+              <CardTitle className="text-lg">{currentQuestion.text}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Code snippet display */}
+              {currentQuestion.code_snippet && (
+                <div className="mb-4 p-4 bg-gray-900 text-green-400 rounded-lg font-mono text-sm overflow-x-auto">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Code className="h-4 w-4" />
+                    <span className="text-xs uppercase">{currentQuestion.programming_language || "Code"}</span>
+                  </div>
+                  <pre className="whitespace-pre-wrap">{currentQuestion.code_snippet}</pre>
                 </div>
+              )}
+
+              {/* Options */}
+              <div className="space-y-3">
+                {currentQuestion.options.map((option: string, index: number) => (
+                  <label
+                    key={index}
+                    className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${
+                      answers[currentQuestion.id] === index
+                        ? "border-purple-500 bg-purple-50"
+                        : "border-gray-200 hover:border-purple-300"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name={`question-${currentQuestion.id}`}
+                      value={index}
+                      checked={answers[currentQuestion.id] === index}
+                      onChange={() => handleAnswerSelect(currentQuestion.id, index)}
+                      className="mr-3 text-purple-600"
+                    />
+                    <span className="font-medium mr-2">{String.fromCharCode(65 + index)}.</span>
+                    <span>{option}</span>
+                  </label>
+                ))}
               </div>
-              <p className="mt-3 font-medium text-red-700">
-                Multiple security violations may result in automatic test submission.
-              </p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                setShowSecurityWarning(false)
-                blurContent()
-              }}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              I Understand
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </DashboardLayout>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Navigation */}
+        <div className="flex justify-between items-center">
+          <Button variant="outline" onClick={handlePreviousQuestion} disabled={currentQuestionIndex === 0}>
+            Previous
+          </Button>
+
+          <div className="flex gap-2">
+            {questions.map((_, index) => (
+              <button
+                key={index}
+                onClick={() => setCurrentQuestionIndex(index)}
+                className={`w-8 h-8 rounded-full text-sm font-medium ${
+                  index === currentQuestionIndex
+                    ? "bg-purple-600 text-white"
+                    : answers[questions[index]?.id] !== undefined
+                      ? "bg-green-100 text-green-800 border border-green-300"
+                      : "bg-gray-100 text-gray-600 border border-gray-300"
+                }`}
+              >
+                {index + 1}
+              </button>
+            ))}
+          </div>
+
+          {currentQuestionIndex === questions.length - 1 ? (
+            <Button onClick={handleSubmitTest} disabled={submitting} className="bg-green-600 hover:bg-green-700">
+              {submitting ? "Submitting..." : "Submit Test"}
+            </Button>
+          ) : (
+            <Button onClick={handleNextQuestion}>Next</Button>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
