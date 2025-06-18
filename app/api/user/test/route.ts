@@ -5,21 +5,26 @@ import { supabaseServer } from "@/lib/supabase/server"
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const testId = searchParams.get("id")
-    const userId = cookies().get("userId")?.value
-    const role = cookies().get("role")?.value
+    const testId = searchParams.get("testId") || searchParams.get("id")
+
+    // Get user credentials from cookies
+    const cookieStore = cookies()
+    const userId = cookieStore.get("user_id")?.value
+    const role = cookieStore.get("role")?.value
+
+    console.log("=== USER TEST ACCESS API - START ===")
+    console.log("User ID from cookies:", userId)
+    console.log("Role from cookies:", role)
+    console.log("Test ID:", testId)
 
     if (!userId || role !== "user") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      console.log("Authentication failed - userId:", userId, "role:", role)
+      return NextResponse.json({ error: "Unauthorized - Please log in again" }, { status: 401 })
     }
 
     if (!testId) {
       return NextResponse.json({ error: "Test ID is required" }, { status: 400 })
     }
-
-    console.log("=== USER TEST ACCESS API - START ===")
-    console.log("User ID:", userId)
-    console.log("Test ID:", testId)
 
     // First, check if the user is assigned to this test
     const { data: userTest, error: assignmentError } = await supabaseServer
@@ -30,7 +35,7 @@ export async function GET(request: Request) {
       .single()
 
     if (assignmentError || !userTest) {
-      console.log("User not assigned to this test")
+      console.log("User not assigned to this test:", assignmentError)
       return NextResponse.json(
         {
           error: "You are not assigned to this test",
@@ -87,11 +92,11 @@ export async function GET(request: Request) {
     return NextResponse.json({
       test: {
         ...test,
+        questions: questions || [],
         assignment_status: userTest.status,
         assigned_at: userTest.assigned_at,
         due_date: userTest.due_date,
       },
-      questions: questions || [],
     })
   } catch (error) {
     console.error("Error in user test API:", error)

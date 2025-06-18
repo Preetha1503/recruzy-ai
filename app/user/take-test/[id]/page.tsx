@@ -356,24 +356,36 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         setLoading(true)
         setError(null)
 
-        // Updated API call to include userId for authorization check
-        const testResponse = await fetch(`/api/user/test?testId=${testId}&userId=${currentUserId}`)
+        // Updated API call - remove userId from query params since it's read from cookies
+        const testResponse = await fetch(`/api/user/test?testId=${testId}`)
+
         if (!testResponse.ok) {
-          if (testResponse.status === 403) {
+          const errorData = await testResponse.json().catch(() => ({}))
+
+          if (testResponse.status === 401) {
+            setError("Authentication failed. Please log in again.")
+            // Redirect to login after a short delay
+            setTimeout(() => {
+              window.location.href = "/login"
+            }, 2000)
+          } else if (testResponse.status === 403) {
             setError("You are not authorized to access this test. This test has not been assigned to you.")
           } else {
-            throw new Error(`Failed to fetch test: ${testResponse.statusText}`)
+            setError(errorData.error || `Failed to fetch test: ${testResponse.statusText}`)
           }
           setLoading(false)
           return
         }
 
         const testData = await testResponse.json()
+
         if (testData.error) {
           if (testData.error.includes("not assigned") || testData.error.includes("not authorized")) {
             setError("You are not authorized to access this test. This test has not been assigned to you.")
+          } else if (testData.error.includes("already completed")) {
+            setError("You have already completed this test.")
           } else {
-            throw new Error(testData.error)
+            setError(testData.error)
           }
           setLoading(false)
           return
@@ -385,13 +397,21 @@ export default function TakeTest({ params }: { params: { id: string } }) {
           return
         }
 
-        setTest(testData.test)
-        setTimeLeft(testData.test.duration * 60)
-        setAnswers(new Array(testData.test.questions.length).fill(null))
-        setMarkedForReview(new Array(testData.test.questions.length).fill(false))
+        // Set test data with questions included
+        const testWithQuestions = {
+          ...testData.test,
+          questions: testData.test.questions || [],
+        }
+
+        setTest(testWithQuestions)
+        setTimeLeft(testWithQuestions.duration * 60)
+        setAnswers(new Array(testWithQuestions.questions.length).fill(null))
+        setMarkedForReview(new Array(testWithQuestions.questions.length).fill(false))
+
+        console.log("Test loaded successfully:", testWithQuestions.title)
       } catch (err) {
         console.error("Error fetching test:", err)
-        setError(err instanceof Error ? err.message : "Failed to load test")
+        setError("Failed to load test. Please check your internet connection and try again.")
       } finally {
         setLoading(false)
       }
