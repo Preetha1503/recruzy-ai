@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { supabaseServer } from "@/lib/supabase/server"
+import { createServerClient } from "@/lib/supabase/server"
 
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   try {
     const testId = params.id
     const { answers, violations, timeSpent } = await request.json()
+    const supabase = createServerClient()
 
     // Get user credentials from cookies
     const cookieStore = cookies()
@@ -17,7 +18,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     // Get the test with questions to calculate score
-    const { data: test, error: testError } = await supabaseServer
+    const { data: test, error: testError } = await supabase
       .from("tests")
       .select(`
         *,
@@ -46,7 +47,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const score = Math.round((correctAnswers / totalQuestions) * 100)
 
     // Insert test result
-    const { data: resultData, error: resultError } = await supabaseServer
+    const { data: resultData, error: resultError } = await supabase
       .from("test_results")
       .insert({
         user_id: userId,
@@ -70,7 +71,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
     }
 
     // Update user_tests status to completed
-    const { error: updateError } = await supabaseServer
+    const { error: updateError } = await supabase
       .from("user_tests")
       .update({ status: "completed" })
       .eq("user_id", userId)

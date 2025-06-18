@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,16 +10,6 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle, Clock, Shield, Code, Brain, Wrench } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { DashboardLayout } from "@/components/dashboard-layout"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 
 // Watermark component
 const WatermarkOverlay = ({ userEmail }: { userEmail: string }) => {
@@ -55,6 +47,43 @@ const QuestionTypeIcon = ({ type }: { type: string }) => {
       return <Brain className="h-4 w-4 text-gray-500" />
   }
 }
+
+// Simple Alert Dialog components
+const AlertDialog = ({
+  open,
+  onOpenChange,
+  children,
+}: { open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) => {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">{children}</div>
+    </div>
+  )
+}
+
+const AlertDialogContent = ({ children }: { children: React.ReactNode }) => <>{children}</>
+const AlertDialogHeader = ({ children }: { children: React.ReactNode }) => <div className="mb-4">{children}</div>
+const AlertDialogTitle = ({ children }: { children: React.ReactNode }) => (
+  <h2 className="text-lg font-semibold mb-2">{children}</h2>
+)
+const AlertDialogDescription = ({ children }: { children: React.ReactNode }) => (
+  <div className="text-sm text-gray-600">{children}</div>
+)
+const AlertDialogFooter = ({ children }: { children: React.ReactNode }) => (
+  <div className="flex justify-end gap-2 mt-4">{children}</div>
+)
+const AlertDialogAction = ({
+  onClick,
+  children,
+  className,
+  variant,
+}: { onClick: () => void; children: React.ReactNode; className?: string; variant?: string }) => (
+  <Button onClick={onClick} className={className} variant={variant as any}>
+    {children}
+  </Button>
+)
 
 export default function TakeTest() {
   const router = useRouter()
@@ -380,40 +409,34 @@ export default function TakeTest() {
 
   if (loading) {
     return (
-      <DashboardLayout requiredRole="user">
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading test...</p>
-          </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading test...</p>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
   if (error) {
     return (
-      <DashboardLayout requiredRole="user">
-        <div className="min-h-screen flex items-center justify-center">
-          <Alert variant="destructive" className="max-w-md">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        </div>
-      </DashboardLayout>
+      <div className="min-h-screen flex items-center justify-center">
+        <Alert variant="destructive" className="max-w-md">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      </div>
     )
   }
 
   if (!test || questions.length === 0) {
     return (
-      <DashboardLayout requiredRole="user">
-        <div className="min-h-screen flex items-center justify-center">
-          <Alert className="max-w-md">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>No test data or questions found.</AlertDescription>
-          </Alert>
-        </div>
-      </DashboardLayout>
+      <div className="min-h-screen flex items-center justify-center">
+        <Alert className="max-w-md">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>No test data or questions found.</AlertDescription>
+        </Alert>
+      </div>
     )
   }
 

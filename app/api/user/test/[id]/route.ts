@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { supabaseServer } from "@/lib/supabase/server"
+import { createServerClient } from "@/lib/supabase/server"
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   try {
     const testId = params.id
+    const supabase = createServerClient()
 
     // Get user credentials from cookies
     const cookieStore = cookies()
@@ -27,7 +28,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
 
     // First, check if the user is assigned to this test
-    const { data: userTest, error: assignmentError } = await supabaseServer
+    const { data: userTest, error: assignmentError } = await supabase
       .from("user_tests")
       .select("*")
       .eq("user_id", userId)
@@ -45,7 +46,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
 
     // Get the test details with questions
-    const { data: test, error: testError } = await supabaseServer
+    const { data: test, error: testError } = await supabase
       .from("tests")
       .select(`
         *,
@@ -71,7 +72,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
 
     // Check if user has already completed this test
-    const { data: existingResult, error: resultError } = await supabaseServer
+    const { data: existingResult, error: resultError } = await supabase
       .from("test_results")
       .select("id")
       .eq("user_id", userId)
