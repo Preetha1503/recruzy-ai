@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertCircle, CheckCircle, Clock, AlertTriangle } from "lucide-react"
+import { AlertCircle, CheckCircle, Clock, AlertTriangle, Shield } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import Link from "next/link"
 import { submitTestResult } from "@/app/actions/results"
@@ -23,6 +23,8 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { PermissionRequest } from "@/components/test/permission-request"
 import { AIProctoring } from "@/components/test/ai-proctor"
+import { WatermarkOverlay } from "@/components/test/watermark-overlay"
+import { ProgrammingQuestion } from "@/components/test/programming-question"
 
 export default function TakeTest({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -80,6 +82,20 @@ export default function TakeTest({ params }: { params: { id: string } }) {
   const MAX_MULTIPLE_FACES_VIOLATIONS = 5
   const MAX_TAB_SWITCH_VIOLATIONS = 5
 
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [screenshotAttempts, setScreenshotAttempts] = useState(0)
+  const [devToolsAttempts, setDevToolsAttempts] = useState(0)
+  const [rightClickAttempts, setRightClickAttempts] = useState(0)
+  const [securityViolations, setSecurityViolations] = useState({
+    screenshot: 0,
+    devTools: 0,
+    rightClick: 0,
+    print: 0,
+  })
+  const [showSecurityWarning, setShowSecurityWarning] = useState(false)
+  const [securityViolationType, setSecurityViolationType] = useState<string>("")
+  const [testBlurred, setTestBlurred] = useState(false)
+
   // Improve the handleSubmit function to properly clean up camera resources
   const handleSubmit = useCallback(async () => {
     if (!test || !userId || isSubmitting) return
@@ -87,7 +103,7 @@ export default function TakeTest({ params }: { params: { id: string } }) {
     try {
       setIsSubmitting(true)
 
-      // Stop the camera stream FIRST before doing anything else
+      // Stop the camera stream FIRST
       if (videoRef.current && videoRef.current.srcObject) {
         try {
           const stream = videoRef.current.srcObject as MediaStream
@@ -102,6 +118,20 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         }
       }
 
+      // Exit fullscreen mode BEFORE submitting
+      if (document.fullscreenElement) {
+        try {
+          await document.exitFullscreen()
+          console.log("Exited fullscreen successfully")
+        } catch (err) {
+          console.error("Error exiting fullscreen:", err)
+        }
+      }
+
+      // Reset permissions and show sidebar
+      setPermissionsGranted(false)
+      setShowSidebar(true)
+
       const answersRecord: Record<string, number> = {}
       test.questions.forEach((question, index) => {
         if (answers[index] !== null) {
@@ -115,10 +145,9 @@ export default function TakeTest({ params }: { params: { id: string } }) {
       formData.append("timeTaken", String(test.duration * 60 - timeLeft))
       formData.append("startedAt", startTime)
       formData.append("tabSwitchAttempts", String(tabSwitchAttempts))
-
-      // Add proctoring violations to the form data
       formData.append("noFaceViolations", String(proctorViolations.noFace))
       formData.append("multipleFacesViolations", String(proctorViolations.multipleFaces))
+      formData.append("securityViolations", JSON.stringify(securityViolations))
 
       const result = await submitTestResult(formData)
 
@@ -132,18 +161,6 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         setIsSubmitting(false)
         return
       }
-
-      // Exit fullscreen mode
-      if (document.fullscreenElement) {
-        try {
-          await document.exitFullscreen()
-        } catch (err) {
-          console.error("Error exiting fullscreen:", err)
-        }
-      }
-
-      // Reset permissions
-      setPermissionsGranted(false)
 
       // Navigate to results page
       router.push(`/user/test-results/${result.resultId}`)
@@ -164,6 +181,7 @@ export default function TakeTest({ params }: { params: { id: string } }) {
     startTime,
     tabSwitchAttempts,
     proctorViolations,
+    securityViolations,
     router,
     toast,
     answers,
@@ -614,6 +632,133 @@ export default function TakeTest({ params }: { params: { id: string } }) {
     }
   }, [permissionsGranted, toast])
 
+  // Enhanced security measures
+  useEffect(() => {
+    if (!permissionsGranted) return
+
+    // Get user email from cookies
+    const cookies = document.cookie.split("; ")
+    const emailCookie = cookies.find((cookie) => cookie.startsWith("user_email="))
+    const currentUserEmail = emailCookie ? decodeURIComponent(emailCookie.split("=")[1]) : null
+    setUserEmail(currentUserEmail)
+
+    // Disable text selection and right-click
+    document.body.style.userSelect = "none"
+    document.body.style.webkitUserSelect = "none"
+    document.body.style.mozUserSelect = "none"
+    document.body.style.msUserSelect = "none"
+
+    // Prevent screenshot attempts
+    const preventScreenshot = (e: KeyboardEvent) => {
+      // Print Screen key
+      if (e.key === "PrintScreen") {
+        e.preventDefault()
+        setScreenshotAttempts((prev) => prev + 1)
+        setSecurityViolations((prev) => ({ ...prev, screenshot: prev.screenshot + 1 }))
+        setSecurityViolationType("screenshot")
+        setShowSecurityWarning(true)
+      }
+
+      // Common screenshot shortcuts
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "S" || e.key === "3" || e.key === "4")) {
+        e.preventDefault()
+        setScreenshotAttempts((prev) => prev + 1)
+        setSecurityViolations((prev) => ({ ...prev, screenshot: prev.screenshot + 1 }))
+        setSecurityViolationType("screenshot")
+        setShowSecurityWarning(true)
+      }
+
+      // Prevent developer tools
+      if (
+        e.key === "F12" ||
+        (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) ||
+        (e.ctrlKey && e.key === "U")
+      ) {
+        e.preventDefault()
+        setDevToolsAttempts((prev) => prev + 1)
+        setSecurityViolations((prev) => ({ ...prev, devTools: prev.devTools + 1 }))
+        setSecurityViolationType("developer tools")
+        setShowSecurityWarning(true)
+      }
+
+      // Prevent printing
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault()
+        setSecurityViolations((prev) => ({ ...prev, print: prev.print + 1 }))
+        setSecurityViolationType("printing")
+        setShowSecurityWarning(true)
+      }
+    }
+
+    // Prevent right-click context menu
+    const preventRightClick = (e: MouseEvent) => {
+      e.preventDefault()
+      setRightClickAttempts((prev) => prev + 1)
+      setSecurityViolations((prev) => ({ ...prev, rightClick: prev.rightClick + 1 }))
+      setSecurityViolationType("right-click menu")
+      setShowSecurityWarning(true)
+    }
+
+    // Detect developer tools opening
+    const devtools = {
+      open: false,
+      orientation: null,
+    }
+
+    const threshold = 160
+
+    const detectDevTools = () => {
+      if (window.outerHeight - window.innerHeight > threshold || window.outerWidth - window.innerWidth > threshold) {
+        if (!devtools.open) {
+          devtools.open = true
+          setDevToolsAttempts((prev) => prev + 1)
+          setSecurityViolations((prev) => ({ ...prev, devTools: prev.devTools + 1 }))
+          setSecurityViolationType("developer tools")
+          setShowSecurityWarning(true)
+        }
+      } else {
+        devtools.open = false
+      }
+    }
+
+    // Blur content when security violations occur
+    const blurContent = () => {
+      setTestBlurred(true)
+      setTimeout(() => setTestBlurred(false), 3000) // Blur for 3 seconds
+    }
+
+    // Add event listeners
+    document.addEventListener("keydown", preventScreenshot)
+    document.addEventListener("contextmenu", preventRightClick)
+    window.addEventListener("resize", detectDevTools)
+
+    // Check for dev tools every 500ms
+    const devToolsInterval = setInterval(detectDevTools, 500)
+
+    // Disable drag and drop
+    const preventDragDrop = (e: DragEvent) => {
+      e.preventDefault()
+    }
+
+    document.addEventListener("dragstart", preventDragDrop)
+    document.addEventListener("drop", preventDragDrop)
+
+    return () => {
+      document.removeEventListener("keydown", preventScreenshot)
+      document.removeEventListener("contextmenu", preventRightClick)
+      document.removeEventListener("dragstart", preventDragDrop)
+      document.removeEventListener("drop", preventDragDrop)
+      window.removeEventListener("resize", detectDevTools)
+      clearInterval(devToolsInterval)
+
+      // Reset styles
+      document.body.style.userSelect = ""
+      document.body.style.webkitUserSelect = ""
+      document.body.style.mozUserSelect = ""
+      document.body.style.msUserSelect = ""
+    }
+  }, [permissionsGranted])
+
   const formatTime = (seconds: number) => {
     const hours = Math.floor(seconds / 3600)
     const mins = Math.floor((seconds % 3600) / 60)
@@ -783,37 +928,60 @@ export default function TakeTest({ params }: { params: { id: string } }) {
 
             <Progress value={progress} className="h-2 bg-gray-200" indicatorClassName="bg-blue-500" />
 
-            {/* Question Card */}
-            <Card className="border-gray-200 max-h-[60vh] overflow-y-auto">
-              <CardHeader>
-                <CardTitle className="text-lg text-gray-800">Question {currentQuestion + 1}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <p className="text-gray-700">{question.text}</p>
-                  {question.options.map((option, index) => (
-                    <div
-                      key={index}
-                      className={`flex items-center rounded-md border p-3 cursor-pointer transition-colors ${
-                        answers[currentQuestion] === index
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                      } ${testPaused ? "opacity-50 pointer-events-none" : ""}`}
-                      onClick={() => handleAnswerSelect(currentQuestion, index)}
-                    >
-                      <div
-                        className={`mr-3 flex h-5 w-5 items-center justify-center rounded-sm border ${
-                          answers[currentQuestion] === index ? "border-blue-500 bg-blue-500" : "border-gray-300"
-                        }`}
-                      >
-                        {answers[currentQuestion] === index && <CheckCircle className="h-4 w-4 text-white" />}
+            {/* Question Card with Watermark */}
+            <div className="relative">
+              {userEmail && (
+                <WatermarkOverlay userEmail={userEmail} testId={testId} className={testBlurred ? "blur-sm" : ""} />
+              )}
+
+              <div className={`transition-all duration-300 ${testBlurred ? "blur-sm" : ""}`}>
+                {question.type === "multiple_choice" ? (
+                  <Card className="border-gray-200 max-h-[60vh] overflow-y-auto">
+                    <CardHeader>
+                      <CardTitle className="text-lg text-gray-800 flex items-center gap-2">
+                        Question {currentQuestion + 1}
+                        <span className="text-sm font-normal text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                          Multiple Choice
+                        </span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <p className="text-gray-700">{question.text}</p>
+                        {question.options.map((option, index) => (
+                          <div
+                            key={index}
+                            className={`flex items-center rounded-md border p-3 cursor-pointer transition-colors ${
+                              answers[currentQuestion] === index
+                                ? "border-blue-500 bg-blue-50"
+                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                            } ${testPaused ? "opacity-50 pointer-events-none" : ""}`}
+                            onClick={() => handleAnswerSelect(currentQuestion, index)}
+                          >
+                            <div
+                              className={`mr-3 flex h-5 w-5 items-center justify-center rounded-sm border ${
+                                answers[currentQuestion] === index ? "border-blue-500 bg-blue-500" : "border-gray-300"
+                              }`}
+                            >
+                              {answers[currentQuestion] === index && <CheckCircle className="h-4 w-4 text-white" />}
+                            </div>
+                            <span>{option}</span>
+                          </div>
+                        ))}
                       </div>
-                      <span>{option}</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <ProgrammingQuestion
+                    question={question}
+                    currentAnswer={answers[currentQuestion]}
+                    onAnswerSelect={(optionIndex) => handleAnswerSelect(currentQuestion, optionIndex)}
+                    questionNumber={currentQuestion + 1}
+                    isDisabled={testPaused}
+                  />
+                )}
+              </div>
+            </div>
 
             {/* Navigation Buttons */}
             <div className="flex justify-between items-center mt-4">
@@ -1196,6 +1364,49 @@ export default function TakeTest({ params }: { params: { id: string } }) {
               className="bg-purple-700 hover:bg-purple-800 text-white"
             >
               Continue Test
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Security Violation Warning Dialog */}
+      <AlertDialog open={showSecurityWarning} onOpenChange={setShowSecurityWarning}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <Shield className="h-5 w-5" />
+              Security Violation Detected
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              An attempt to use {securityViolationType} has been detected. This action is not allowed during the test
+              and has been logged.
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+                <div className="text-sm text-red-800">
+                  <p>
+                    <strong>Current Violations:</strong>
+                  </p>
+                  <ul className="list-disc list-inside mt-1 space-y-1">
+                    <li>Screenshots: {securityViolations.screenshot}</li>
+                    <li>Developer Tools: {securityViolations.devTools}</li>
+                    <li>Right-click Menu: {securityViolations.rightClick}</li>
+                    <li>Print Attempts: {securityViolations.print}</li>
+                  </ul>
+                </div>
+              </div>
+              <p className="mt-3 font-medium text-red-700">
+                Multiple security violations may result in automatic test submission.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                setShowSecurityWarning(false)
+                blurContent()
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              I Understand
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

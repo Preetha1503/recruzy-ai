@@ -61,28 +61,41 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No valid users found for assignment" }, { status: 400 })
     }
 
-    // First, clear any existing assignments for this test to avoid duplicates
-    const { error: deleteError } = await supabaseServer.from("user_tests").delete().eq("test_id", testId)
+    // Get existing assignments for this test to preserve them
+    const { data: existingAssignments, error: existingError } = await supabaseServer
+      .from("user_tests")
+      .select("user_id")
+      .eq("test_id", testId)
 
-    if (deleteError) {
-      console.error("Error clearing existing assignments:", deleteError)
-      return NextResponse.json({ error: "Failed to clear existing assignments" }, { status: 500 })
+    if (existingError) {
+      console.error("Error fetching existing assignments:", existingError)
+      return NextResponse.json({ error: "Failed to fetch existing assignments" }, { status: 500 })
     }
 
-    // Create new assignments for the selected users
-    const assignments = targetUsers.map((user) => ({
-      user_id: user.id,
-      test_id: testId,
-      assigned_at: new Date().toISOString(),
-      due_date: dueDate || null,
-      status: "assigned",
-    }))
+    const existingUserIds = (existingAssignments || []).map((a) => a.user_id)
+    const newUserIds = targetUsers.map((u) => u.id).filter((id) => !existingUserIds.includes(id))
 
-    const { error: insertError } = await supabaseServer.from("user_tests").insert(assignments)
+    console.log(`Existing assignments: ${existingUserIds.length}`)
+    console.log(`New assignments to create: ${newUserIds.length}`)
 
-    if (insertError) {
-      console.error("Error creating assignments:", insertError)
-      return NextResponse.json({ error: "Failed to create assignments" }, { status: 500 })
+    // Only create assignments for users who don't already have them
+    if (newUserIds.length > 0) {
+      const newAssignments = newUserIds.map((userId) => ({
+        user_id: userId,
+        test_id: testId,
+        assigned_at: new Date().toISOString(),
+        due_date: dueDate || null,
+        status: "assigned",
+      }))
+
+      const { error: insertError } = await supabaseServer.from("user_tests").insert(newAssignments)
+
+      if (insertError) {
+        console.error("Error creating new assignments:", insertError)
+        return NextResponse.json({ error: "Failed to create new assignments" }, { status: 500 })
+      }
+
+      console.log(`Successfully created ${newUserIds.length} new assignments`)
     }
 
     // Update test status to published
@@ -99,13 +112,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to update test status" }, { status: 500 })
     }
 
-    console.log(`Successfully assigned test to ${targetUsers.length} users`)
+    const totalAssigned = existingUserIds.length + newUserIds.length
+    console.log(
+      `Test assigned to ${totalAssigned} users total (${newUserIds.length} new, ${existingUserIds.length} existing)`,
+    )
     console.log("=== ASSIGN TEST API - SUCCESS ===")
 
     return NextResponse.json({
       success: true,
-      assignedCount: targetUsers.length,
-      message: `Test assigned to ${targetUsers.length} users successfully`,
+      assignedCount: totalAssigned,
+      newAssignments: newUserIds.length,
+      existingAssignments: existingUserIds.length,
+      message: `Test assigned successfully. ${newUserIds.length} new assignments created, ${existingUserIds.length} existing assignments preserved.`,
     })
   } catch (error) {
     console.error("Error in assign test API:", error)

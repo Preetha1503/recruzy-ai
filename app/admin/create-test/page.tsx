@@ -46,12 +46,30 @@ export default function CreateTest() {
   const [additionalQuestionCount, setAdditionalQuestionCount] = useState(5)
   const [additionalQuestionDifficulty, setAdditionalQuestionDifficulty] = useState("intermediate")
   const [isAddingManually, setIsAddingManually] = useState(false)
+
+  // Add these states after the existing state declarations
+  const [questionType, setQuestionType] = useState<
+    "multiple_choice" | "code_snippet" | "output_prediction" | "error_identification"
+  >("multiple_choice")
+  const [programmingLanguage, setProgrammingLanguage] = useState<"javascript" | "python" | "java" | "cpp" | "c">(
+    "javascript",
+  )
+  const [codeSnippet, setCodeSnippet] = useState("")
+  const [expectedOutput, setExpectedOutput] = useState("")
+  const [errorLine, setErrorLine] = useState<number | null>(null)
+
+  // Update the newQuestion initialization
   const [newQuestion, setNewQuestion] = useState({
     text: "",
+    type: "multiple_choice" as const,
     options: ["", "", "", ""],
     correct_answer: 0,
     difficulty: "intermediate",
     explanation: "",
+    code_snippet: "",
+    expected_output: "",
+    error_line: null,
+    programming_language: "javascript",
   })
 
   const getSelectedDifficulties = () => {
@@ -273,10 +291,15 @@ export default function CreateTest() {
     if (question) {
       setNewQuestion({
         text: question.text,
+        type: question.type,
         options: [...question.options],
         correct_answer: question.correct_answer,
         difficulty: question.difficulty,
         explanation: question.explanation || "",
+        code_snippet: question.code_snippet || "",
+        expected_output: question.expected_output || "",
+        error_line: question.error_line || null,
+        programming_language: question.programming_language || "javascript",
       })
       setIsAddingManually(true)
       setNewQuestion((prev) => ({ ...prev, id: questionId }))
@@ -340,10 +363,15 @@ export default function CreateTest() {
     setIsAddingManually(true)
     setNewQuestion({
       text: "",
+      type: "multiple_choice" as const,
       options: ["", "", "", ""],
       correct_answer: 0,
       difficulty: "intermediate",
       explanation: "",
+      code_snippet: "",
+      expected_output: "",
+      error_line: null,
+      programming_language: "javascript",
     })
   }
 
@@ -629,6 +657,95 @@ export default function CreateTest() {
                       required
                     />
                   </div>
+
+                  {/* Add this inside the preview tab, in the manual question form */}
+                  <div className="space-y-2">
+                    <Label htmlFor="question-type">Question Type</Label>
+                    <Select
+                      value={newQuestion.type}
+                      onValueChange={(
+                        value: "multiple_choice" | "code_snippet" | "output_prediction" | "error_identification",
+                      ) => setNewQuestion({ ...newQuestion, type: value })}
+                    >
+                      <SelectTrigger className="border-purple-200 focus:border-purple-500">
+                        <SelectValue placeholder="Select question type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="multiple_choice">Multiple Choice</SelectItem>
+                        <SelectItem value="code_snippet">Code Analysis</SelectItem>
+                        <SelectItem value="output_prediction">Output Prediction</SelectItem>
+                        <SelectItem value="error_identification">Error Identification</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {newQuestion.type !== "multiple_choice" && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="programming-language">Programming Language</Label>
+                        <Select
+                          value={newQuestion.programming_language}
+                          onValueChange={(value: "javascript" | "python" | "java" | "cpp" | "c") =>
+                            setNewQuestion({ ...newQuestion, programming_language: value })
+                          }
+                        >
+                          <SelectTrigger className="border-purple-200 focus:border-purple-500">
+                            <SelectValue placeholder="Select programming language" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="javascript">JavaScript</SelectItem>
+                            <SelectItem value="python">Python</SelectItem>
+                            <SelectItem value="java">Java</SelectItem>
+                            <SelectItem value="cpp">C++</SelectItem>
+                            <SelectItem value="c">C</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="code-snippet">Code Snippet</Label>
+                        <Textarea
+                          id="code-snippet"
+                          value={newQuestion.code_snippet}
+                          onChange={(e) => setNewQuestion({ ...newQuestion, code_snippet: e.target.value })}
+                          className="border-purple-200 focus:border-purple-500 font-mono min-h-32"
+                          placeholder="Enter the code snippet here..."
+                        />
+                      </div>
+
+                      {newQuestion.type === "output_prediction" && (
+                        <div className="space-y-2">
+                          <Label htmlFor="expected-output">Expected Output Format</Label>
+                          <Input
+                            id="expected-output"
+                            value={newQuestion.expected_output}
+                            onChange={(e) => setNewQuestion({ ...newQuestion, expected_output: e.target.value })}
+                            className="border-purple-200 focus:border-purple-500 font-mono"
+                            placeholder="e.g., number, string, array, etc."
+                          />
+                        </div>
+                      )}
+
+                      {newQuestion.type === "error_identification" && (
+                        <div className="space-y-2">
+                          <Label htmlFor="error-line">Error Line Number (Optional)</Label>
+                          <Input
+                            id="error-line"
+                            type="number"
+                            value={newQuestion.error_line || ""}
+                            onChange={(e) =>
+                              setNewQuestion({
+                                ...newQuestion,
+                                error_line: e.target.value ? Number.parseInt(e.target.value) : null,
+                              })
+                            }
+                            className="border-purple-200 focus:border-purple-500"
+                            placeholder="Line number where error occurs"
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
 
                   <div className="space-y-4">
                     <Label>Options</Label>
