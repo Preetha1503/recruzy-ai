@@ -1,7 +1,5 @@
 "use client"
 
-import type React from "react"
-
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -48,43 +46,6 @@ const QuestionTypeIcon = ({ type }: { type: string }) => {
   }
 }
 
-// Simple Alert Dialog components
-const AlertDialog = ({
-  open,
-  onOpenChange,
-  children,
-}: { open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) => {
-  if (!open) return null
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">{children}</div>
-    </div>
-  )
-}
-
-const AlertDialogContent = ({ children }: { children: React.ReactNode }) => <>{children}</>
-const AlertDialogHeader = ({ children }: { children: React.ReactNode }) => <div className="mb-4">{children}</div>
-const AlertDialogTitle = ({ children }: { children: React.ReactNode }) => (
-  <h2 className="text-lg font-semibold mb-2">{children}</h2>
-)
-const AlertDialogDescription = ({ children }: { children: React.ReactNode }) => (
-  <div className="text-sm text-gray-600">{children}</div>
-)
-const AlertDialogFooter = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex justify-end gap-2 mt-4">{children}</div>
-)
-const AlertDialogAction = ({
-  onClick,
-  children,
-  className,
-  variant,
-}: { onClick: () => void; children: React.ReactNode; className?: string; variant?: string }) => (
-  <Button onClick={onClick} className={className} variant={variant as any}>
-    {children}
-  </Button>
-)
-
 export default function TakeTest() {
   const router = useRouter()
   const params = useParams()
@@ -102,6 +63,7 @@ export default function TakeTest() {
   const [error, setError] = useState("")
   const [userEmail, setUserEmail] = useState("")
   const [showSubmitDialog, setShowSubmitDialog] = useState(false)
+  const [showGuidelinesDialog, setShowGuidelinesDialog] = useState(false)
 
   // Security state
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -114,13 +76,59 @@ export default function TakeTest() {
   })
   const [isBlurred, setIsBlurred] = useState(false)
   const [showViolationWarning, setShowViolationWarning] = useState(false)
-  const [showGuidelinesDialog, setShowGuidelinesDialog] = useState(false)
 
   // Refs
   const timerRef = useRef<NodeJS.Timeout>()
   const violationTimeoutRef = useRef<NodeJS.Timeout>()
 
-  // Security functions
+  // Memoized functions
+  const handleSubmitTest = useCallback(async () => {
+    if (submitting) return
+
+    setSubmitting(true)
+
+    try {
+      const response = await fetch(`/api/user/test/${testId}/submit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          answers,
+          violations,
+          timeSpent: (test?.duration || 60) * 60 - timeRemaining,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to submit test")
+      }
+
+      const result = await response.json()
+
+      // Exit fullscreen before redirecting
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen()
+        }
+      } catch (err) {
+        console.error("Failed to exit fullscreen:", err)
+      }
+
+      toast({
+        title: "Test Submitted Successfully",
+        description: `Your score: ${result.score}/${result.totalQuestions}`,
+      })
+
+      router.push(`/user/test-results/${result.resultId}`)
+    } catch (err) {
+      console.error("Error submitting test:", err)
+      setError("Failed to submit test. Please try again.")
+      setSubmitting(false)
+    }
+  }, [submitting, testId, answers, violations, test?.duration, timeRemaining, toast, router])
+
   const enterFullscreen = useCallback(async () => {
     try {
       await document.documentElement.requestFullscreen()
@@ -128,17 +136,6 @@ export default function TakeTest() {
     } catch (err) {
       console.error("Failed to enter fullscreen:", err)
       setError("Please enable fullscreen mode to continue with the test")
-    }
-  }, [])
-
-  const exitFullscreen = useCallback(async () => {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen()
-      }
-      setIsFullscreen(false)
-    } catch (err) {
-      console.error("Failed to exit fullscreen:", err)
     }
   }, [])
 
@@ -172,77 +169,6 @@ export default function TakeTest() {
     },
     [toast],
   )
-
-  // Security event listeners
-  useEffect(() => {
-    if (!test) return // Only add listeners after test is loaded
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        handleViolation("tabSwitches")
-      }
-    }
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault()
-      handleViolation("rightClicks")
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Prevent F12, Ctrl+Shift+I, Ctrl+U, etc.
-      if (
-        e.key === "F12" ||
-        (e.ctrlKey && e.shiftKey && e.key === "I") ||
-        (e.ctrlKey && e.shiftKey && e.key === "C") ||
-        (e.ctrlKey && e.key === "u") ||
-        (e.ctrlKey && e.key === "c") ||
-        (e.ctrlKey && e.key === "v") ||
-        (e.ctrlKey && e.key === "x")
-      ) {
-        e.preventDefault()
-        if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
-          handleViolation("devTools")
-        } else if (e.ctrlKey && (e.key === "c" || e.key === "v" || e.key === "x")) {
-          handleViolation("copyPaste")
-        }
-      }
-    }
-
-    const handlePrintScreen = (e: KeyboardEvent) => {
-      if (e.key === "PrintScreen") {
-        e.preventDefault()
-        handleViolation("screenshots")
-      }
-    }
-
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
-      if (!document.fullscreenElement && test) {
-        handleViolation("tabSwitches")
-      }
-    }
-
-    // Add event listeners
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    document.addEventListener("contextmenu", handleContextMenu)
-    document.addEventListener("keydown", handleKeyDown)
-    document.addEventListener("keyup", handlePrintScreen)
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-
-    // Disable text selection
-    document.body.style.userSelect = "none"
-    document.body.style.webkitUserSelect = "none"
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-      document.removeEventListener("contextmenu", handleContextMenu)
-      document.removeEventListener("keydown", handleKeyDown)
-      document.removeEventListener("keyup", handlePrintScreen)
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
-      document.body.style.userSelect = ""
-      document.body.style.webkitUserSelect = ""
-    }
-  }, [handleViolation, test])
 
   // Fetch test data
   useEffect(() => {
@@ -321,7 +247,7 @@ export default function TakeTest() {
       timerRef.current = setTimeout(() => {
         setTimeRemaining((prev) => prev - 1)
       }, 1000)
-    } else if (timeRemaining === 0 && !loading && test) {
+    } else if (timeRemaining === 0 && !loading && test && !showGuidelinesDialog) {
       handleSubmitTest()
     }
 
@@ -330,7 +256,78 @@ export default function TakeTest() {
         clearTimeout(timerRef.current)
       }
     }
-  }, [timeRemaining, loading, test, showGuidelinesDialog])
+  }, [timeRemaining, loading, test, showGuidelinesDialog, handleSubmitTest])
+
+  // Security event listeners
+  useEffect(() => {
+    if (!test) return // Only add listeners after test is loaded
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleViolation("tabSwitches")
+      }
+    }
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+      handleViolation("rightClicks")
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent F12, Ctrl+Shift+I, Ctrl+U, etc.
+      if (
+        e.key === "F12" ||
+        (e.ctrlKey && e.shiftKey && e.key === "I") ||
+        (e.ctrlKey && e.shiftKey && e.key === "C") ||
+        (e.ctrlKey && e.key === "u") ||
+        (e.ctrlKey && e.key === "c") ||
+        (e.ctrlKey && e.key === "v") ||
+        (e.ctrlKey && e.key === "x")
+      ) {
+        e.preventDefault()
+        if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+          handleViolation("devTools")
+        } else if (e.ctrlKey && (e.key === "c" || e.key === "v" || e.key === "x")) {
+          handleViolation("copyPaste")
+        }
+      }
+    }
+
+    const handlePrintScreen = (e: KeyboardEvent) => {
+      if (e.key === "PrintScreen") {
+        e.preventDefault()
+        handleViolation("screenshots")
+      }
+    }
+
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+      if (!document.fullscreenElement && test) {
+        handleViolation("tabSwitches")
+      }
+    }
+
+    // Add event listeners
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    document.addEventListener("contextmenu", handleContextMenu)
+    document.addEventListener("keydown", handleKeyDown)
+    document.addEventListener("keyup", handlePrintScreen)
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+
+    // Disable text selection
+    document.body.style.userSelect = "none"
+    document.body.style.webkitUserSelect = "none"
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      document.removeEventListener("contextmenu", handleContextMenu)
+      document.removeEventListener("keydown", handleKeyDown)
+      document.removeEventListener("keyup", handlePrintScreen)
+      document.removeEventListener("fullscreenchange", handleFullscreenChange)
+      document.body.style.userSelect = ""
+      document.body.style.webkitUserSelect = ""
+    }
+  }, [handleViolation, test])
 
   const handleAnswerSelect = (questionId: string, answerIndex: number) => {
     setAnswers((prev) => ({
@@ -348,47 +345,6 @@ export default function TakeTest() {
   const handlePreviousQuestion = () => {
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex((prev) => prev - 1)
-    }
-  }
-
-  const handleSubmitTest = async () => {
-    if (submitting) return
-
-    setSubmitting(true)
-
-    try {
-      const response = await fetch(`/api/user/test/${testId}/submit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          answers,
-          violations,
-          timeSpent: (test?.duration || 60) * 60 - timeRemaining,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to submit test")
-      }
-
-      const result = await response.json()
-
-      // Exit fullscreen before redirecting
-      await exitFullscreen()
-
-      toast({
-        title: "Test Submitted Successfully",
-        description: `Your score: ${result.score}/${result.totalQuestions}`,
-      })
-
-      router.push(`/user/test-results/${result.resultId}`)
-    } catch (err) {
-      console.error("Error submitting test:", err)
-      setError("Failed to submit test. Please try again.")
-      setSubmitting(false)
     }
   }
 
@@ -445,11 +401,11 @@ export default function TakeTest() {
       <WatermarkOverlay userEmail={userEmail} />
 
       {/* Guidelines Dialog */}
-      <AlertDialog open={showGuidelinesDialog} onOpenChange={setShowGuidelinesDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Test Guidelines</AlertDialogTitle>
-            <AlertDialogDescription>
+      {showGuidelinesDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h2 className="text-lg font-semibold mb-2">Test Guidelines</h2>
+            <div className="text-sm text-gray-600 mb-4">
               Please read the following guidelines before starting the test:
               <ul className="list-disc pl-5 mt-2 space-y-1">
                 <li>Ensure you are in a quiet, well-lit environment.</li>
@@ -460,22 +416,22 @@ export default function TakeTest() {
                 <li>Your activities will be monitored for security violations.</li>
                 <li>Click "Start Test" to begin in fullscreen mode.</li>
               </ul>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={handleStartTest} className="bg-purple-600 hover:bg-purple-700">
-              Start Test
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={handleStartTest} className="bg-purple-600 hover:bg-purple-700">
+                Start Test
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Submit Confirmation Dialog */}
-      <AlertDialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Submit Test</AlertDialogTitle>
-            <AlertDialogDescription>
+      {showSubmitDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h2 className="text-lg font-semibold mb-2">Submit Test</h2>
+            <div className="text-sm text-gray-600 mb-4">
               {answeredCount < questions.length ? (
                 <>
                   You have answered {answeredCount} out of {questions.length} questions. Are you sure you want to submit
@@ -484,18 +440,18 @@ export default function TakeTest() {
               ) : (
                 <>You have answered all {questions.length} questions. Are you sure you want to submit the test?</>
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setShowSubmitDialog(false)} variant="outline">
-              Cancel
-            </AlertDialogAction>
-            <AlertDialogAction onClick={handleSubmitTest} className="bg-green-600 hover:bg-green-700">
-              {submitting ? "Submitting..." : "Submit Test"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setShowSubmitDialog(false)} variant="outline">
+                Cancel
+              </Button>
+              <Button onClick={handleSubmitTest} className="bg-green-600 hover:bg-green-700" disabled={submitting}>
+                {submitting ? "Submitting..." : "Submit Test"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showViolationWarning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
