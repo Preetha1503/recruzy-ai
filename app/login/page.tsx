@@ -2,8 +2,8 @@
 
 import type React from "react"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { login } from "@/app/actions/auth"
 import { Button } from "@/components/ui/button"
@@ -11,11 +11,22 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { setCookie } from "@/lib/cookie-utils"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    // Check if user was redirected from registration
+    const registered = searchParams?.get("registered")
+    if (registered === "true") {
+      setSuccessMessage("Registration successful! Please log in with your new account.")
+    }
+  }, [searchParams])
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -64,11 +75,17 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-purple-50 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center text-purple-800">Login</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center text-purple-800">Recruzy</CardTitle>
           <CardDescription className="text-center">Enter your credentials to access your account</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
+            {successMessage && (
+              <Alert className="bg-green-50 border-green-200">
+                <AlertDescription className="text-green-800">{successMessage}</AlertDescription>
+              </Alert>
+            )}
+
             {error && (
               <div className="p-3 rounded-md bg-red-50 text-red-800 text-sm">
                 <p>{error}</p>

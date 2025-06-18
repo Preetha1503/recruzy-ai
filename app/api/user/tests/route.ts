@@ -6,78 +6,70 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get("userId")
 
-    console.log("=== USER TESTS API - START ===")
-    console.log("Requested User ID:", userId)
-
     if (!userId) {
-      console.log("No userId provided in query params")
       return NextResponse.json({ error: "User ID is required" }, { status: 400 })
     }
 
-    // Get tests assigned to this specific user through user_tests table
-    const { data: userTests, error: userTestsError } = await supabaseServer
-      .from("user_tests")
-      .select(`
-        id,
-        test_id,
-        user_id,
-        status,
-        assigned_at,
-        due_date,
-        tests!inner (
-          id,
-          title,
-          description,
-          topic,
-          duration,
-          status,
-          created_at
-        )
-      `)
-      .eq("user_id", userId)
-      .eq("status", "assigned")
-      .eq("tests.status", "published")
+    console.log(`API: Fetching tests for user: ${userId}`)
 
-    if (userTestsError) {
-      console.error("Error fetching user tests:", userTestsError)
-      return NextResponse.json(
-        {
-          error: `Database error: ${userTestsError.message}`,
-          details: userTestsError,
-        },
-        { status: 500 },
-      )
-    }
-
-    console.log(`Found ${userTests?.length || 0} user test assignments`)
-
-    // Transform the data to match expected format
-    const assignedTests = (userTests || [])
-      .filter((ut) => ut.tests) // Filter out any null tests
-      .map((ut) => ({
-        ...ut.tests,
-        due_date: ut.due_date,
-        user_test_id: ut.id,
-        assigned_at: ut.assigned_at,
-        assignment_status: ut.status,
-      }))
-
-    console.log(`Returning ${assignedTests.length} assigned tests`)
-    console.log("=== USER TESTS API - SUCCESS ===")
+    // Get tests assigned to the user
+    const assignedTests = await getAssignedTests(userId)
+    console.log(`API: Found ${assignedTests.length} assigned tests for user ${userId}`)
 
     return NextResponse.json({
       assignedTests,
-      publishedTests: [], // No longer returning unassigned published tests
+      publishedTests: [], // We're not using this anymore since all published tests should be assigned
     })
   } catch (error) {
-    console.error("Error in user tests API:", error)
-    console.log("=== USER TESTS API - ERROR ===")
-    return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
+    console.error("Error fetching tests:", error)
+    return NextResponse.json({ error: "Failed to fetch tests" }, { status: 500 })
+  }
+}
+
+async function getAssignedTests(userId: string) {
+  try {
+    // Get tests assigned to the user through user_tests table
+    const { data: userTests, error: userTestsError } = await supabaseServer
+      .from("user_tests")
+      .select(`
+      id,
+      test_id,
+      due_date,
+      status,
+      tests (*)
+    `)
+      .eq("user_id", userId)
+      .eq("status", "assigned")
+      .order("due_date", { ascending: true })
+
+    if (userTestsError) {
+      console.error("Error fetching user tests:", userTestsError)
+      return []
+    }
+
+    console.log(`API: Raw user tests data: found ${userTests?.length || 0} records`)
+
+    // Log any tests with missing data
+    const testsWithMissingData = userTests.filter((ut) => !ut.tests)
+    if (testsWithMissingData.length > 0) {
+      console.error(`API: Found ${testsWithMissingData.length} tests with missing data`)
+      testsWithMissingData.forEach((ut) => console.error(`- Missing test data for test_id: ${ut.test_id}`))
+    }
+
+    // Transform the data to match the expected format
+    const formattedTests = userTests
+      .filter((userTest) => userTest.tests) // Filter out any null tests
+      .map((userTest) => ({
+        ...userTest.tests,
+        due_date: userTest.due_date,
+        user_test_id: userTest.id,
+      }))
+
+    console.log(`API: After formatting, returning ${formattedTests.length} tests`)
+
+    return formattedTests
+  } catch (error) {
+    console.error("Error in getAssignedTests:", error)
+    return []
   }
 }

@@ -4,44 +4,20 @@ import { useState, useEffect } from "react"
 import { DashboardLayout } from "@/components/dashboard-layout"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Award, BookOpen, CheckCircle, Clock, FileText, AlertCircle } from "lucide-react"
+import { Award, BookOpen, CheckCircle, Clock, FileText } from "lucide-react"
 import Link from "next/link"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertCircle } from "lucide-react"
 import { getUserId, setCookie } from "@/lib/cookie-utils"
-
-interface Test {
-  id: string
-  title: string
-  description: string
-  topic: string
-  duration: number
-  status: string
-  created_at: string
-  assignment_status?: string
-  assigned_at?: string
-  due_date?: string | null
-}
-
-interface TestResult {
-  id: string
-  test_id: string
-  score: number
-  time_taken: number
-  completed_at: string
-  tests: {
-    title: string
-    topic: string
-  }
-}
+import type { Test, TestResult } from "@/lib/types"
 
 export default function UserDashboard() {
   const [activeTests, setActiveTests] = useState<Test[]>([])
   const [recentResults, setRecentResults] = useState<TestResult[]>([])
   const [stats, setStats] = useState({
     testsCompleted: 0,
-    averageScore: 0,
-    activeTestsCount: 0,
+    averageScore: "0%",
+    activeTests: 0,
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,11 +39,12 @@ export default function UserDashboard() {
 
     setUserId(userIdFromCookie)
 
-    const fetchDashboardData = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true)
         setError(null)
 
+        // Use the userId from state
         const currentUserId = userIdFromCookie
 
         if (!currentUserId) {
@@ -83,21 +60,13 @@ export default function UserDashboard() {
         console.log("Fetching dashboard data for user:", currentUserId)
 
         // Fetch dashboard data from API
-        const response = await fetch(`/api/user/dashboard?userId=${currentUserId}`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        })
+        const response = await fetch(`/api/user/dashboard?userId=${currentUserId}`)
 
         if (!response.ok) {
-          const errorText = await response.text()
-          console.error("API Response Error:", response.status, errorText)
-          throw new Error(`Failed to fetch dashboard data: ${response.status} ${response.statusText}`)
+          throw new Error(`Failed to fetch dashboard data: ${response.statusText}`)
         }
 
         const data = await response.json()
-        console.log("Dashboard API Response:", data)
 
         if (data.error) {
           throw new Error(data.error)
@@ -107,71 +76,56 @@ export default function UserDashboard() {
         setRecentResults(data.recentResults || [])
         setStats({
           testsCompleted: data.testsCompleted || 0,
-          averageScore: data.averageScore || 0,
-          activeTestsCount: data.activeTestsCount || 0,
+          averageScore: data.averageScore ? `${data.averageScore}%` : "0%",
+          activeTests: data.activeTestsCount || 0,
         })
       } catch (error: any) {
         console.error("Error fetching dashboard data:", error)
-        setError(`Failed to load dashboard: ${error.message}`)
+        setError(`An unexpected error occurred: ${error.message}`)
       } finally {
         setLoading(false)
       }
     }
 
     if (userIdFromCookie) {
-      fetchDashboardData()
+      fetchData()
     } else {
       setLoading(false)
     }
   }, [])
 
   const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString)
-      const now = new Date()
-      const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
 
-      if (diffDays === 0) return "Today"
-      if (diffDays === 1) return "Yesterday"
-      if (diffDays < 7) return `${diffDays} days ago`
-      return date.toLocaleDateString()
-    } catch {
-      return "Unknown date"
-    }
+    if (diffDays === 0) return "Today"
+    if (diffDays === 1) return "Yesterday"
+    if (diffDays < 7) return `${diffDays} days ago`
+    return date.toLocaleDateString()
   }
 
-  const formatDueDate = (dateString: string | null | undefined) => {
+  const formatDueDate = (dateString: string | null) => {
     if (!dateString) return "No due date"
 
-    try {
-      const dueDate = new Date(dateString)
-      const now = new Date()
-      const diffDays = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    const dueDate = new Date(dateString)
+    const now = new Date()
+    const diffDays = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 
-      if (diffDays < 0) return "Overdue"
-      if (diffDays === 0) return "Due today"
-      if (diffDays === 1) return "Due tomorrow"
-      if (diffDays < 7) return `Due in ${diffDays} days`
-      return dueDate.toLocaleDateString()
-    } catch {
-      return "Invalid date"
-    }
+    if (diffDays < 0) return "Overdue"
+    if (diffDays === 0) return "Today"
+    if (diffDays === 1) return "Tomorrow"
+    if (diffDays < 7) return `In ${diffDays} days`
+    return dueDate.toLocaleDateString()
   }
 
-  const getDueDateColor = (dateString: string | null | undefined) => {
-    if (!dateString) return "bg-gray-100 text-gray-800"
-
-    try {
-      const dueDate = new Date(dateString)
-      const now = new Date()
-      const diffDays = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-
-      if (diffDays < 0) return "bg-red-100 text-red-800"
-      if (diffDays <= 1) return "bg-orange-100 text-orange-800"
-      if (diffDays <= 3) return "bg-yellow-100 text-yellow-800"
-      return "bg-green-100 text-green-800"
-    } catch {
-      return "bg-gray-100 text-gray-800"
+  const handleManualLogin = () => {
+    // For testing - manually set a user ID
+    const testUserId = prompt("Enter a test user ID:")
+    if (testUserId) {
+      setCookie("user_id", testUserId)
+      localStorage.setItem("user_id", testUserId)
+      window.location.reload()
     }
   }
 
@@ -194,9 +148,14 @@ export default function UserDashboard() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>User ID not found. Please log out and log in again.</AlertDescription>
           </Alert>
-          <Button asChild className="bg-purple-700 hover:bg-purple-800 text-white">
-            <Link href="/login">Log In Again</Link>
-          </Button>
+          <div className="flex flex-col space-y-4">
+            <Button asChild className="bg-purple-700 hover:bg-purple-800 text-white">
+              <Link href="/login">Log In Again</Link>
+            </Button>
+            <Button onClick={handleManualLogin} variant="outline">
+              Set User ID Manually (Debug)
+            </Button>
+          </div>
         </div>
       </DashboardLayout>
     )
@@ -211,8 +170,8 @@ export default function UserDashboard() {
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-          <Button onClick={() => window.location.reload()} className="bg-purple-700 hover:bg-purple-800 text-white">
-            Retry
+          <Button asChild className="bg-purple-700 hover:bg-purple-800 text-white">
+            <Link href="/user/dashboard">Retry</Link>
           </Button>
         </div>
       </DashboardLayout>
@@ -225,7 +184,6 @@ export default function UserDashboard() {
         <h1 className="text-3xl font-bold text-purple-800">Your Dashboard</h1>
         <div className="text-sm text-gray-500">User ID: {userId}</div>
 
-        {/* Stats Cards */}
         <div className="grid gap-6 md:grid-cols-3">
           <Card className="border-purple-200">
             <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
@@ -243,7 +201,7 @@ export default function UserDashboard() {
               <Award className="h-5 w-5 text-purple-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-purple-800">{stats.averageScore}%</div>
+              <div className="text-3xl font-bold text-purple-800">{stats.averageScore}</div>
             </CardContent>
           </Card>
 
@@ -253,13 +211,12 @@ export default function UserDashboard() {
               <BookOpen className="h-5 w-5 text-purple-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-purple-800">{stats.activeTestsCount}</div>
+              <div className="text-3xl font-bold text-purple-800">{stats.activeTests}</div>
             </CardContent>
           </Card>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
-          {/* Active Tests */}
           <Card className="border-purple-200">
             <CardHeader>
               <CardTitle className="text-xl text-purple-800">Active Tests</CardTitle>
@@ -272,29 +229,25 @@ export default function UserDashboard() {
                     <div key={test.id} className="rounded-lg border border-purple-100 p-4">
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium text-purple-800">{test.title}</h3>
-                        <Badge className={getDueDateColor(test.due_date)} variant="secondary">
-                          {formatDueDate(test.due_date)}
-                        </Badge>
+                        <div className="rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800">
+                          Due: {formatDueDate(test.due_date || null)}
+                        </div>
                       </div>
                       <div className="mt-2 flex items-center text-sm text-gray-500">
                         <Clock className="mr-1 h-4 w-4 text-purple-500" />
                         {test.duration} min
                         <FileText className="ml-3 mr-1 h-4 w-4 text-purple-500" />
                         {test.topic}
-                      </div>
-                      <div className="mt-3">
-                        <Button asChild size="sm" className="bg-purple-700 hover:bg-purple-800 text-white">
-                          <Link href={`/user/take-test/${test.id}`}>Start Test</Link>
-                        </Button>
+                        {test.status === "draft" && (
+                          <span className="ml-3 rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">
+                            Draft
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="py-8 text-center">
-                    <BookOpen className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Tests Assigned</h3>
-                    <p className="text-gray-500 mb-4">You don't have any active tests assigned to you at the moment.</p>
-                  </div>
+                  <div className="py-8 text-center text-gray-500">No active tests assigned to you.</div>
                 )}
               </div>
             </CardContent>
@@ -305,7 +258,6 @@ export default function UserDashboard() {
             </CardFooter>
           </Card>
 
-          {/* Recent Results */}
           <Card className="border-purple-200">
             <CardHeader>
               <CardTitle className="text-xl text-purple-800">Recent Results</CardTitle>
@@ -326,10 +278,8 @@ export default function UserDashboard() {
                     </div>
                   ))
                 ) : (
-                  <div className="py-8 text-center">
-                    <Award className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No Results Yet</h3>
-                    <p className="text-gray-500">Complete a test to see your results here.</p>
+                  <div className="py-8 text-center text-gray-500">
+                    No test results yet. Complete a test to see your results here.
                   </div>
                 )}
               </div>

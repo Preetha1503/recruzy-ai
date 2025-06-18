@@ -5,10 +5,39 @@ import { cookies } from "next/headers"
 import { createServerClient } from "@/lib/supabase/server"
 
 async function getStats() {
-  try {
-    const userId = cookies().get("user_id")?.value
+  const userId = cookies().get("user_id")?.value
 
-    if (!userId) {
+  if (!userId) {
+    return {
+      interviewsConducted: 0,
+      attendees: 0,
+      testsCreated: 0,
+      recentTests: [],
+      topUsers: [],
+    }
+  }
+
+  try {
+    // Create a server client with admin privileges to bypass RLS
+    const cookieStore = cookies()
+    const supabase = createServerClient(cookieStore)
+
+    // Get tests created by admin
+    const { data: tests, error: testsError } = await supabase.from("tests").select("*").eq("created_by", userId)
+
+    if (testsError) {
+      console.error("Error fetching tests:", testsError)
+      return {
+        interviewsConducted: 0,
+        attendees: 0,
+        testsCreated: tests?.length || 0,
+        recentTests: [],
+        topUsers: [],
+      }
+    }
+
+    // If no tests, return early with zeros
+    if (!tests || tests.length === 0) {
       return {
         interviewsConducted: 0,
         attendees: 0,
@@ -18,152 +47,112 @@ async function getStats() {
       }
     }
 
+    // Get test IDs for further queries
+    const testIds = tests.map((t) => t.id)
+
+    // Get completed tests count - with error handling
+    let completedCount = 0
     try {
-      // Create a server client with admin privileges to bypass RLS
-      const cookieStore = cookies()
-      const supabase = createServerClient(cookieStore)
+      const { count, error: completedError } = await supabase
+        .from("test_results")
+        .select("*", { count: "exact", head: true })
+        .in("test_id", testIds)
 
-      // Get tests created by admin
-      const { data: tests, error: testsError } = await supabase.from("tests").select("*").eq("created_by", userId)
-
-      if (testsError) {
-        console.error("Error fetching tests:", testsError)
-        return {
-          interviewsConducted: 0,
-          attendees: 0,
-          testsCreated: tests?.length || 0,
-          recentTests: [],
-          topUsers: [],
-        }
-      }
-
-      // If no tests, return early with zeros
-      if (!tests || tests.length === 0) {
-        return {
-          interviewsConducted: 0,
-          attendees: 0,
-          testsCreated: 0,
-          recentTests: [],
-          topUsers: [],
-        }
-      }
-
-      // Get test IDs for further queries
-      const testIds = tests.map((t) => t.id)
-
-      // Get completed tests count - with error handling
-      let completedCount = 0
-      try {
-        const { count, error: completedError } = await supabase
-          .from("test_results")
-          .select("*", { count: "exact", head: true })
-          .in("test_id", testIds)
-
-        if (!completedError) {
-          completedCount = count || 0
-        } else {
-          console.error("Error fetching completed tests:", completedError)
-        }
-      } catch (err) {
-        console.error("Exception in completed tests query:", err)
-      }
-
-      // Get unique attendees - with error handling
-      let uniqueAttendees = 0
-      try {
-        const { data: attendees, error: attendeesError } = await supabase
-          .from("test_results")
-          .select("user_id")
-          .in("test_id", testIds)
-
-        if (!attendeesError && attendees) {
-          uniqueAttendees = new Set(attendees.map((a) => a.user_id)).size
-        } else {
-          console.error("Error fetching attendees:", attendeesError)
-        }
-      } catch (err) {
-        console.error("Exception in attendees query:", err)
-      }
-
-      // Get recent tests - with error handling
-      let recentTestsData = []
-      try {
-        const { data: recentTests, error: recentError } = await supabase
-          .from("tests")
-          .select(`
-            id,
-            title,
-            created_at,
-            user_tests (
-              id
-            )
-          `)
-          .eq("created_by", userId)
-          .order("created_at", { ascending: false })
-          .limit(3)
-
-        if (!recentError && recentTests) {
-          recentTestsData = recentTests.map((test) => ({
-            name: test.title,
-            date: new Date(test.created_at).toLocaleDateString(),
-            participants: test.user_tests?.length || 0,
-          }))
-        } else {
-          console.error("Error fetching recent tests:", recentError)
-        }
-      } catch (err) {
-        console.error("Exception in recent tests query:", err)
-      }
-
-      // Get top performing users - with error handling
-      let topUsersData = []
-      try {
-        const { data: topUsers, error: topError } = await supabase
-          .from("test_results")
-          .select(`
-            score,
-            users (
-              id,
-              username
-            ),
-            test_id
-          `)
-          .in("test_id", testIds)
-          .order("score", { ascending: false })
-          .limit(3)
-
-        if (!topError && topUsers) {
-          topUsersData = topUsers.map((result) => ({
-            name: result.users?.username || "Unknown",
-            score: `${result.score}%`,
-            tests: 1, // This is simplified, in a real app you'd count tests per user
-          }))
-        } else {
-          console.error("Error fetching top users:", topError)
-        }
-      } catch (err) {
-        console.error("Exception in top users query:", err)
-      }
-
-      return {
-        interviewsConducted: completedCount,
-        attendees: uniqueAttendees,
-        testsCreated: tests.length,
-        recentTests: recentTestsData,
-        topUsers: topUsersData,
+      if (!completedError) {
+        completedCount = count || 0
+      } else {
+        console.error("Error fetching completed tests:", completedError)
       }
     } catch (err) {
-      console.error("Error in getStats inner try:", err)
-      return {
-        interviewsConducted: 0,
-        attendees: 0,
-        testsCreated: 0,
-        recentTests: [],
-        topUsers: [],
+      console.error("Exception in completed tests query:", err)
+    }
+
+    // Get unique attendees - with error handling
+    let uniqueAttendees = 0
+    try {
+      const { data: attendees, error: attendeesError } = await supabase
+        .from("test_results")
+        .select("user_id")
+        .in("test_id", testIds)
+
+      if (!attendeesError && attendees) {
+        uniqueAttendees = new Set(attendees.map((a) => a.user_id)).size
+      } else {
+        console.error("Error fetching attendees:", attendeesError)
       }
+    } catch (err) {
+      console.error("Exception in attendees query:", err)
+    }
+
+    // Get recent tests - with error handling
+    let recentTestsData = []
+    try {
+      const { data: recentTests, error: recentError } = await supabase
+        .from("tests")
+        .select(`
+          id,
+          title,
+          created_at,
+          user_tests (
+            id
+          )
+        `)
+        .eq("created_by", userId)
+        .order("created_at", { ascending: false })
+        .limit(3)
+
+      if (!recentError && recentTests) {
+        recentTestsData = recentTests.map((test) => ({
+          name: test.title,
+          date: new Date(test.created_at).toLocaleDateString(),
+          participants: test.user_tests?.length || 0,
+        }))
+      } else {
+        console.error("Error fetching recent tests:", recentError)
+      }
+    } catch (err) {
+      console.error("Exception in recent tests query:", err)
+    }
+
+    // Get top performing users - with error handling
+    let topUsersData = []
+    try {
+      const { data: topUsers, error: topError } = await supabase
+        .from("test_results")
+        .select(`
+          score,
+          users (
+            id,
+            username
+          ),
+          test_id
+        `)
+        .in("test_id", testIds)
+        .order("score", { ascending: false })
+        .limit(3)
+
+      if (!topError && topUsers) {
+        topUsersData = topUsers.map((result) => ({
+          name: result.users?.username || "Unknown",
+          score: `${result.score}%`,
+          tests: 1, // This is simplified, in a real app you'd count tests per user
+        }))
+      } else {
+        console.error("Error fetching top users:", topError)
+      }
+    } catch (err) {
+      console.error("Exception in top users query:", err)
+    }
+
+    return {
+      interviewsConducted: completedCount,
+      attendees: uniqueAttendees,
+      testsCreated: tests.length,
+      recentTests: recentTestsData,
+      topUsers: topUsersData,
     }
   } catch (err) {
-    console.error("Error in getStats outer try:", err)
+    console.error("Error in getStats:", err)
     return {
       interviewsConducted: 0,
       attendees: 0,

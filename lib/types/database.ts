@@ -47,5 +47,5 @@ export type UserTest = {
   test_id: string
   status: "assigned" | "in_progress" | "completed"
   assigned_at: string
-  due_date: string | null
+  due_date: string
 }

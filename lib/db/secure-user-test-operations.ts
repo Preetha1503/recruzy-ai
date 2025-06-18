@@ -1,13 +1,13 @@
 import { supabaseServer } from "@/lib/supabase/server"
 
 /**
- * Get active tests for a user, bypassing RLS - ONLY ASSIGNED TESTS
+ * Get active tests for a user, bypassing RLS
  */
 export async function getActiveTestsForUser(userId: string) {
   try {
     console.log(`Getting active tests for user: ${userId}`)
 
-    // Get ONLY tests that are specifically assigned to this user
+    // Get both assigned specific tests AND published tests
     const { data: assignedTests, error: assignedError } = await supabaseServer
       .from("user_tests")
       .select(`
@@ -15,8 +15,7 @@ export async function getActiveTestsForUser(userId: string) {
         test_id,
         due_date,
         status,
-        assigned_at,
-        tests!inner (
+        tests (
           id,
           title,
           description,
@@ -28,7 +27,6 @@ export async function getActiveTestsForUser(userId: string) {
       `)
       .eq("user_id", userId)
       .in("status", ["assigned", "started"])
-      .eq("tests.status", "published") // Only include published tests
       .order("due_date", { ascending: true })
 
     if (assignedError) {
@@ -36,7 +34,7 @@ export async function getActiveTestsForUser(userId: string) {
       return []
     }
 
-    console.log(`Found ${assignedTests?.length || 0} assigned tests for user ${userId}`)
+    console.log(`Found ${assignedTests?.length || 0} directly assigned tests`)
 
     // For debugging - list the test details
     if (assignedTests && assignedTests.length > 0) {
@@ -54,76 +52,39 @@ export async function getActiveTestsForUser(userId: string) {
 }
 
 /**
- * Check if a user is assigned to a specific test
- */
-export async function isUserAssignedToTest(userId: string, testId: string): Promise<boolean> {
-  try {
-    console.log(`Checking if user ${userId} is assigned to test ${testId}`)
-
-    const { data: assignment, error } = await supabaseServer
-      .from("user_tests")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("test_id", testId)
-      .eq("status", "assigned")
-      .single()
-
-    if (error) {
-      if (error.code === "PGRST116") {
-        // No rows returned - user is not assigned
-        console.log(`User ${userId} is NOT assigned to test ${testId}`)
-        return false
-      }
-      console.error("Error checking test assignment:", error)
-      return false
-    }
-
-    console.log(`User ${userId} IS assigned to test ${testId}`)
-    return !!assignment
-  } catch (error) {
-    console.error("Error in isUserAssignedToTest:", error)
-    return false
-  }
-}
-
-/**
- * Get test assignment details for a user
- */
-export async function getUserTestAssignment(userId: string, testId: string) {
-  try {
-    const { data: assignment, error } = await supabaseServer
-      .from("user_tests")
-      .select(`
-        id,
-        test_id,
-        user_id,
-        due_date,
-        status,
-        assigned_at,
-        started_at,
-        completed_at
-      `)
-      .eq("user_id", userId)
-      .eq("test_id", testId)
-      .eq("status", "assigned")
-      .single()
-
-    if (error) {
-      console.error("Error fetching user test assignment:", error)
-      return null
-    }
-
-    return assignment
-  } catch (error) {
-    console.error("Error in getUserTestAssignment:", error)
-    return null
-  }
-}
-
-/**
- * This function is no longer used - we don't show unassigned published tests
+ * Get published tests not assigned to user, bypassing RLS
  */
 export async function getPublishedTestsNotAssignedToUser(userId: string) {
-  // Return empty array since we only show assigned tests now
-  return []
+  try {
+    // First get all tests assigned to the user
+    const { data: userTests, error: userTestsError } = await supabaseServer
+      .from("user_tests")
+      .select("test_id")
+      .eq("user_id", userId)
+
+    if (userTestsError) {
+      console.error("Error fetching user tests:", userTestsError)
+      return []
+    }
+
+    const assignedTestIds = userTests?.map((ut) => ut.test_id) || []
+
+    // Then get all published tests not in the assigned list
+    const { data: publishedTests, error: publishedError } = await supabaseServer
+      .from("tests")
+      .select("*")
+      .eq("status", "published")
+      .order("created_at", { ascending: false })
+
+    if (publishedError) {
+      console.error("Error fetching published tests:", publishedError)
+      return []
+    }
+
+    // Filter out tests that are already assigned to the user
+    return publishedTests?.filter((test) => !assignedTestIds.includes(test.id)) || []
+  } catch (error) {
+    console.error("Error in getPublishedTestsNotAssignedToUser:", error)
+    return []
+  }
 }

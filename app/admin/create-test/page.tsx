@@ -89,14 +89,16 @@ export default function CreateTest() {
 
     setError("")
     setGeneratingQuestions(true)
-    setSuccess("")
+    setSuccess("") // Clear any previous success message
 
     try {
+      // Show a toast notification that we're generating questions
       toast({
         title: "Generating Questions",
         description: "Please wait while we generate questions using AI...",
       })
 
+      // Prepare difficulty distribution if custom is enabled
       const distribution = customDistribution
         ? Object.fromEntries(
             Object.entries(difficultyDistribution).filter(([difficulty]) => selectedDifficulties[difficulty]),
@@ -123,13 +125,15 @@ export default function CreateTest() {
 
       const data = await response.json()
 
+      // Add unique IDs to the questions
       const newQuestions = data.questions.map((q: any) => ({
         ...q,
         id: `${q.difficulty}-${Math.random().toString(36).substring(2, 11)}`,
-        test_id: "",
+        test_id: "", // This will be set when the test is created
         created_at: new Date().toISOString(),
       }))
 
+      // Add the new questions to the existing ones
       setQuestions((prev) => [...prev, ...newQuestions])
 
       if (questions.length === 0 && newQuestions.length > 0) {
@@ -195,13 +199,15 @@ export default function CreateTest() {
 
       const data = await response.json()
 
+      // Add unique IDs to the questions
       const newQuestions = data.questions.map((q: any) => ({
         ...q,
         id: `${q.difficulty}-${Math.random().toString(36).substring(2, 11)}`,
-        test_id: "",
+        test_id: "", // This will be set when the test is created
         created_at: new Date().toISOString(),
       }))
 
+      // Add the new questions to the existing ones
       setQuestions((prev) => [...prev, ...newQuestions])
 
       toast({
@@ -249,7 +255,7 @@ export default function CreateTest() {
       setSuccess("Test created successfully!")
       toast({
         title: "Success",
-        description: "Test created successfully! You can now assign it to users from the Tests page.",
+        description: "Test created successfully! It has been saved to your drafts.",
       })
 
       // Redirect to the test management page after a short delay
@@ -279,6 +285,7 @@ export default function CreateTest() {
         explanation: question.explanation || "",
       })
       setIsAddingManually(true)
+      // Store the ID of the question being edited
       setNewQuestion((prev) => ({ ...prev, id: questionId }))
     }
   }
@@ -348,18 +355,21 @@ export default function CreateTest() {
   }
 
   const handleSaveManualQuestion = () => {
+    // Validate the question
     if (!newQuestion.text || newQuestion.options.some((opt) => !opt)) {
       setError("Please fill in all question fields")
       return
     }
 
     if ("id" in newQuestion) {
+      // Editing existing question
       setQuestions(
         questions.map((q) =>
           q.id === newQuestion.id ? { ...newQuestion, id: q.id, test_id: "", created_at: q.created_at } : q,
         ),
       )
     } else {
+      // Adding new question
       const newQuestionWithId = {
         ...newQuestion,
         id: `manual-${Math.random().toString(36).substring(2, 11)}`,
@@ -783,7 +793,7 @@ export default function CreateTest() {
                     {loading ? (
                       <div className="flex items-center">
                         <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
-                        <span>Creating...</span>
+                        <span>Creating Test...</span>
                       </div>
                     ) : (
                       <>
