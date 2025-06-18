@@ -16,22 +16,67 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Clock, FileText, MoreVertical, Trash2, Calendar, CheckCircle, Globe, PenLine, RefreshCw } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Badge } from "@/components/ui/badge"
+import {
+  Clock,
+  FileText,
+  MoreVertical,
+  Trash2,
+  Calendar,
+  CheckCircle,
+  RefreshCw,
+  Users,
+  UserCheck,
+  Eye,
+  UserPlus,
+  Globe,
+} from "lucide-react"
 import Link from "next/link"
 import type { Test } from "@/lib/types"
 import { useToast } from "@/hooks/use-toast"
 
+interface User {
+  id: string
+  name?: string
+  email: string
+  role: string
+}
+
+interface TestWithAssignmentInfo extends Test {
+  assignment_type?: "all" | "specific"
+  assigned_user_count?: number
+  total_user_count?: number
+  questions?:
+    | {
+        count?: number
+        countQuestions?: number
+      }
+    | any[]
+    | number
+  countQuestions?: number
+}
+
 export default function TestManagement() {
-  const [tests, setTests] = useState<Test[]>([])
+  const [tests, setTests] = useState<TestWithAssignmentInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedTest, setSelectedTest] = useState<Test | null>(null)
+  const [selectedTest, setSelectedTest] = useState<TestWithAssignmentInfo | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showActivateDialog, setShowActivateDialog] = useState(false)
   const [showPublishDialog, setShowPublishDialog] = useState(false)
+  const [showAssignDialog, setShowAssignDialog] = useState(false)
+  const [showAssignedUsersDialog, setShowAssignedUsersDialog] = useState(false)
+  const [assignedUsers, setAssignedUsers] = useState<User[]>([])
   const [dueDate, setDueDate] = useState("")
   const [deleteInProgress, setDeleteInProgress] = useState(false)
   const [statusUpdateInProgress, setStatusUpdateInProgress] = useState(false)
+  const [users, setUsers] = useState<User[]>([])
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [assignmentType, setAssignmentType] = useState<"all" | "specific" | null>(null)
   const { toast } = useToast()
+  const [selectAll, setSelectAll] = useState(false)
 
   useEffect(() => {
     fetchTests()
@@ -74,6 +119,45 @@ export default function TestManagement() {
     }
   }
 
+  const fetchUsers = async () => {
+    setLoadingUsers(true)
+    try {
+      const response = await fetch("/api/admin/users")
+      if (!response.ok) {
+        throw new Error("Failed to fetch users")
+      }
+      const data = await response.json()
+      setUsers(data.users.filter((user: User) => user.role === "user"))
+    } catch (err) {
+      console.error("Error fetching users:", err)
+      toast({
+        title: "Error",
+        description: "Failed to fetch users",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingUsers(false)
+    }
+  }
+
+  const fetchAssignedUsers = async (testId: string) => {
+    try {
+      const response = await fetch(`/api/admin/tests/${testId}/assigned-users`)
+      if (!response.ok) {
+        throw new Error("Failed to fetch assigned users")
+      }
+      const data = await response.json()
+      setAssignedUsers(data.users || [])
+    } catch (err) {
+      console.error("Error fetching assigned users:", err)
+      toast({
+        title: "Error",
+        description: "Failed to fetch assigned users",
+        variant: "destructive",
+      })
+    }
+  }
+
   const handleDeleteTest = async () => {
     if (!selectedTest) return
 
@@ -110,86 +194,192 @@ export default function TestManagement() {
     }
   }
 
-  const handleUpdateStatus = async (status: "active" | "draft" | "completed" | "published") => {
+  const handleActivateTest = async (type: "all" | "specific") => {
+    if (!selectedTest) return
+
+    setAssignmentType(type)
+
+    if (type === "specific") {
+      await fetchUsers()
+      setShowActivateDialog(false)
+      setShowAssignDialog(true)
+    } else {
+      // Directly activate and assign to all users
+      await assignTest("all", [])
+    }
+  }
+
+  const assignTest = async (type: "all" | "specific", userIds: string[]) => {
     if (!selectedTest) return
 
     try {
       setStatusUpdateInProgress(true)
 
-      console.log("=== TEST STATUS UPDATE - START ===")
-      console.log("Test ID:", selectedTest.id)
-      console.log("Current Status:", selectedTest.status)
-      console.log("New Status:", status)
-      console.log("Due Date:", dueDate || "Not specified")
-      console.log("API Endpoint:", `/api/admin/tests/${selectedTest.id}/status`)
-      console.log(
-        "Request Body:",
-        JSON.stringify(
-          {
-            status,
-            dueDate: dueDate || undefined,
-          },
-          null,
-          2,
-        ),
-      )
-
-      const response = await fetch(`/api/admin/tests/${selectedTest.id}/status`, {
-        method: "PATCH",
+      const response = await fetch("/api/admin/assign-test", {
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          status,
-          dueDate: dueDate || undefined,
+          testId: selectedTest.id,
+          assignmentType: type,
+          userIds: type === "specific" ? userIds : [],
+          dueDate: dueDate || null,
         }),
       })
 
-      console.log("Response Status:", response.status)
-      const responseData = await response.json()
-      console.log("Response Data:", responseData)
-      console.log("=== TEST STATUS UPDATE - END ===")
-
       if (!response.ok) {
-        throw new Error("Failed to update test status")
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to assign test")
       }
+
+      const data = await response.json()
 
       fetchTests()
       toast({
         title: "Success",
-        description: `Test ${status} successfully.`,
+        description: `Test activated and assigned to ${data.assignedCount} users!`,
       })
     } catch (error) {
-      console.error("Error updating test status:", error)
+      console.error("Error assigning test:", error)
       toast({
         title: "Error",
-        description: "Failed to update test status.",
+        description: "Failed to assign test.",
         variant: "destructive",
       })
     } finally {
       setStatusUpdateInProgress(false)
       setShowActivateDialog(false)
-      setShowPublishDialog(false)
+      setShowAssignDialog(false)
       setSelectedTest(null)
+      setSelectedUsers([])
+      setSelectAll(false) // Reset select all
       setDueDate("")
     }
+  }
+
+  const handleUserSelection = (userId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedUsers((prev) => [...prev, userId])
+    } else {
+      setSelectedUsers((prev) => prev.filter((id) => id !== userId))
+      setSelectAll(false) // Uncheck select all if any user is deselected
+    }
+  }
+
+  const handleSelectAll = (checked: boolean) => {
+    setSelectAll(checked)
+    if (checked) {
+      setSelectedUsers(users.map((user) => user.id))
+    } else {
+      setSelectedUsers([])
+    }
+  }
+
+  // Update the effect to sync select all state
+  useEffect(() => {
+    if (users.length > 0 && selectedUsers.length === users.length) {
+      setSelectAll(true)
+    } else {
+      setSelectAll(false)
+    }
+  }, [selectedUsers, users])
+
+  const handleAssignToSelected = () => {
+    if (selectedUsers.length === 0) {
+      toast({
+        title: "Error",
+        description: "Please select at least one user",
+        variant: "destructive",
+      })
+      return
+    }
+    assignTest("specific", selectedUsers)
+  }
+
+  const handleViewAssignedUsers = async (test: TestWithAssignmentInfo) => {
+    setSelectedTest(test)
+    await fetchAssignedUsers(test.id)
+    setShowAssignedUsersDialog(true)
+  }
+
+  const handleAssignToOtherUsers = async (test: TestWithAssignmentInfo) => {
+    setSelectedTest(test)
+    setAssignmentType("specific")
+    await fetchUsers()
+    setShowAssignDialog(true)
   }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "draft":
-        return <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-800">Draft</span>
+        return <Badge variant="secondary">Draft</Badge>
       case "active":
-        return <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">Active</span>
+        return (
+          <Badge variant="default" className="bg-blue-600">
+            Active
+          </Badge>
+        )
       case "published":
-        return <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">Published</span>
+        return (
+          <Badge variant="default" className="bg-green-600">
+            Published
+          </Badge>
+        )
       case "completed":
         return (
-          <span className="rounded-full bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800">Completed</span>
+          <Badge variant="default" className="bg-purple-600">
+            Completed
+          </Badge>
         )
       default:
-        return <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-800">{status}</span>
+        return <Badge variant="secondary">{status}</Badge>
     }
+  }
+
+  const isRestrictedTest = (test: TestWithAssignmentInfo) => {
+    // A test is restricted only if it's published to specific users (not all users)
+    return test.status === "published" && test.assignment_type === "specific"
+  }
+
+  const isPublishedToAll = (test: TestWithAssignmentInfo) => {
+    // A test is published to all if it's published and assignment_type is 'all'
+    return test.status === "published" && test.assignment_type === "all"
+  }
+
+  const getQuestionsCount = (test: TestWithAssignmentInfo) => {
+    // Handle nested questions object with count property
+    if (test.questions && typeof test.questions === "object" && "count" in test.questions) {
+      return test.questions.count || 0
+    }
+
+    // Handle questions as array
+    if (test.questions && Array.isArray(test.questions)) {
+      return test.questions.length
+    }
+
+    // Handle questions as direct number
+    if (typeof test.questions === "number" && test.questions > 0) {
+      return test.questions
+    }
+
+    // Handle question_count field
+    if (test.question_count && test.question_count > 0) {
+      return test.question_count
+    }
+
+    // Handle countQuestions field
+    if (test.countQuestions && test.countQuestions > 0) {
+      return test.countQuestions
+    }
+
+    // Handle nested countQuestions in questions object
+    if (test.questions && typeof test.questions === "object" && "countQuestions" in test.questions) {
+      return test.questions.countQuestions || 0
+    }
+
+    // Return 0 for draft tests or when no questions are found
+    return 0
   }
 
   if (loading) {
@@ -259,12 +449,26 @@ export default function TestManagement() {
                         ? publishedTests
                         : completedTests
                 ).map((test) => (
-                  <Card key={test.id} className="border-purple-200">
+                  <Card
+                    key={test.id}
+                    className={`border-purple-200 ${isRestrictedTest(test) ? "bg-orange-50 border-orange-200" : ""}`}
+                  >
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-xl text-purple-800">{test.title}</CardTitle>
                         <div className="flex items-center gap-2">
                           {getStatusBadge(test.status)}
+                          {isPublishedToAll(test) && (
+                            <Badge variant="outline" className="text-green-600 border-green-300">
+                              <Globe className="mr-1 h-3 w-3" />
+                              Public Access
+                            </Badge>
+                          )}
+                          {isRestrictedTest(test) && (
+                            <Badge variant="outline" className="text-orange-600 border-orange-300">
+                              Restricted Access
+                            </Badge>
+                          )}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon">
@@ -286,42 +490,13 @@ export default function TestManagement() {
                                 </DropdownMenuItem>
                               )}
 
-                              {(test.status === "draft" || test.status === "active") && (
+                              {test.status === "published" && (
                                 <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedTest(test)
-                                    setShowPublishDialog(true)
-                                  }}
+                                  onClick={() => handleAssignToOtherUsers(test)}
                                   className="flex items-center"
                                 >
-                                  <Globe className="mr-2 h-4 w-4 text-green-600" />
-                                  Publish to All Users
-                                </DropdownMenuItem>
-                              )}
-
-                              {test.status !== "completed" && (
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedTest(test)
-                                    handleUpdateStatus("completed")
-                                  }}
-                                  className="flex items-center"
-                                >
-                                  <CheckCircle className="mr-2 h-4 w-4 text-purple-600" />
-                                  Mark as Completed
-                                </DropdownMenuItem>
-                              )}
-
-                              {test.status === "completed" && (
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedTest(test)
-                                    handleUpdateStatus("active")
-                                  }}
-                                  className="flex items-center"
-                                >
-                                  <PenLine className="mr-2 h-4 w-4 text-blue-600" />
-                                  Reactivate Test
+                                  <UserPlus className="mr-2 h-4 w-4 text-green-600" />
+                                  Assign to Other Users
                                 </DropdownMenuItem>
                               )}
 
@@ -357,9 +532,41 @@ export default function TestManagement() {
                         </div>
                         <div className="flex items-center">
                           <FileText className="mr-1 h-4 w-4 text-purple-500" />
-                          {test.questions.length} Questions
+                          {getQuestionsCount(test)} Questions
                         </div>
                       </div>
+
+                      {/* Assignment Info Section */}
+                      {test.status === "published" && (
+                        <div className="mt-3">
+                          {isPublishedToAll(test) ? (
+                            <div className="flex items-center text-green-600 text-sm">
+                              <Globe className="mr-2 h-4 w-4" />
+                              <span className="font-medium">Assigned to All Users</span>
+                              {test.total_user_count && (
+                                <span className="ml-2 text-gray-500">({test.total_user_count} users)</span>
+                              )}
+                            </div>
+                          ) : test.assigned_user_count === test.total_user_count && test.total_user_count > 0 ? (
+                            <div className="flex items-center text-blue-600 text-sm">
+                              <UserCheck className="mr-2 h-4 w-4" />
+                              <span className="font-medium">Assigned to all users</span>
+                              <span className="ml-2 text-gray-500">({test.assigned_user_count} users)</span>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleViewAssignedUsers(test)}
+                              className="text-orange-600 border-orange-300 hover:bg-orange-50"
+                            >
+                              <Eye className="mr-2 h-4 w-4" />
+                              View Assigned Users
+                              {test.assigned_user_count && <span className="ml-2">({test.assigned_user_count})</span>}
+                            </Button>
+                          )}
+                        </div>
+                      )}
                     </CardContent>
                     <CardFooter className="flex justify-end gap-2">
                       {test.status === "draft" && (
@@ -370,18 +577,8 @@ export default function TestManagement() {
                           }}
                           className="bg-blue-600 hover:bg-blue-700 text-white"
                         >
+                          <Users className="mr-2 h-4 w-4" />
                           Make Active
-                        </Button>
-                      )}
-                      {(test.status === "draft" || test.status === "active") && (
-                        <Button
-                          onClick={() => {
-                            setSelectedTest(test)
-                            setShowPublishDialog(true)
-                          }}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          Publish
                         </Button>
                       )}
                     </CardFooter>
@@ -443,71 +640,148 @@ export default function TestManagement() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Make Test Active</DialogTitle>
-              <DialogDescription>
-                Making this test active will allow you to assign it to specific users. You can set an optional due date
-                for the test.
-              </DialogDescription>
+              <DialogDescription>Choose how you want to activate and assign this test to users.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="due-date">Due Date (Optional)</Label>
                 <Input
                   id="due-date"
-                  type="date"
+                  type="datetime-local"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
-                  min={new Date().toISOString().split("T")[0]}
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex gap-2">
               <Button variant="outline" onClick={() => setShowActivateDialog(false)} disabled={statusUpdateInProgress}>
                 Cancel
               </Button>
               <Button
-                onClick={() => handleUpdateStatus("active")}
+                onClick={() => handleActivateTest("all")}
+                disabled={statusUpdateInProgress}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Assign to All Users
+              </Button>
+              <Button
+                onClick={() => handleActivateTest("specific")}
                 disabled={statusUpdateInProgress}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {statusUpdateInProgress ? "Updating..." : "Make Active"}
+                <UserCheck className="mr-2 h-4 w-4" />
+                Assign to Specific Users
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Publish Test Dialog */}
-        <Dialog open={showPublishDialog} onOpenChange={setShowPublishDialog}>
-          <DialogContent>
+        {/* Assignment Dialog */}
+        <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle>Publish Test to All Users</DialogTitle>
+              <DialogTitle>Assign Test to Specific Users</DialogTitle>
               <DialogDescription>
-                Publishing this test will make it available to all users in the system. Each user will receive this test
-                in their active tests list. You can set an optional due date for the test.
+                Select the users you want to assign this test to. Selected users will see this test in their Active
+                Tests section.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="publish-due-date">Due Date (Optional)</Label>
-                <Input
-                  id="publish-due-date"
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  min={new Date().toISOString().split("T")[0]}
-                />
+
+            <div className="space-y-4">
+              {loadingUsers ? (
+                <div className="flex justify-center py-8">
+                  <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-200 border-t-purple-700"></div>
+                </div>
+              ) : (
+                <>
+                  {/* Select All Checkbox */}
+                  <div className="flex items-center space-x-2 p-3 bg-gray-50 rounded-md border">
+                    <Checkbox id="select-all" checked={selectAll} onCheckedChange={handleSelectAll} />
+                    <label htmlFor="select-all" className="text-sm font-semibold text-gray-700 cursor-pointer">
+                      Select All Users ({users.length})
+                    </label>
+                  </div>
+
+                  <ScrollArea className="h-96 w-full border rounded-md p-4">
+                    <div className="space-y-2">
+                      {users.map((user) => (
+                        <div key={user.id} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded">
+                          <Checkbox
+                            id={`user-${user.id}`}
+                            checked={selectedUsers.includes(user.id)}
+                            onCheckedChange={(checked) => handleUserSelection(user.id, !!checked)}
+                          />
+                          <label
+                            htmlFor={`user-${user.id}`}
+                            className="flex-1 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            {user.email.split("@")[0]}
+                            <span className="text-gray-500 ml-2">({user.email})</span>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </>
+              )}
+
+              <div className="text-sm text-gray-600 bg-blue-50 p-2 rounded">
+                Selected: {selectedUsers.length} of {users.length} user{users.length !== 1 ? "s" : ""}
+                {selectedUsers.length === users.length && users.length > 0 && (
+                  <span className="ml-2 text-blue-600 font-medium">• All users selected</span>
+                )}
               </div>
             </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowPublishDialog(false)} disabled={statusUpdateInProgress}>
+              <Button variant="outline" onClick={() => setShowAssignDialog(false)} disabled={statusUpdateInProgress}>
                 Cancel
               </Button>
               <Button
-                onClick={() => handleUpdateStatus("published")}
-                disabled={statusUpdateInProgress}
-                className="bg-green-600 hover:bg-green-700 text-white"
+                onClick={handleAssignToSelected}
+                disabled={statusUpdateInProgress || selectedUsers.length === 0}
+                className="bg-purple-700 hover:bg-purple-800 text-white"
               >
-                {statusUpdateInProgress ? "Publishing..." : "Publish to All Users"}
+                {statusUpdateInProgress ? (
+                  <div className="flex items-center">
+                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                    <span>Assigning...</span>
+                  </div>
+                ) : (
+                  `Assign to ${selectedUsers.length} User${selectedUsers.length !== 1 ? "s" : ""}`
+                )}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Assigned Users Dialog */}
+        <Dialog open={showAssignedUsersDialog} onOpenChange={setShowAssignedUsersDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Assigned Users</DialogTitle>
+              <DialogDescription>Users who have access to this test: {selectedTest?.title}</DialogDescription>
+            </DialogHeader>
+
+            <ScrollArea className="h-96 w-full border rounded-md p-4">
+              <div className="space-y-2">
+                {assignedUsers.length > 0 ? (
+                  assignedUsers.map((user) => (
+                    <div key={user.id} className="flex items-center space-x-2 p-2 bg-gray-50 rounded">
+                      <UserCheck className="h-4 w-4 text-green-600" />
+                      <span className="font-medium">{user.email.split("@")[0]}</span>
+                      <span className="text-gray-500">({user.email})</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-gray-500">No users assigned to this test</div>
+                )}
+              </div>
+            </ScrollArea>
+
+            <DialogFooter>
+              <Button onClick={() => setShowAssignedUsersDialog(false)}>Close</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

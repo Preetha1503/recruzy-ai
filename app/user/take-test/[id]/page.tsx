@@ -23,7 +23,6 @@ import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { PermissionRequest } from "@/components/test/permission-request"
 import { AIProctoring } from "@/components/test/ai-proctor"
-import { TabSwitchMonitor } from "@/components/test/tab-switch-monitor"
 
 export default function TakeTest({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -77,14 +76,11 @@ export default function TakeTest({ params }: { params: { id: string } }) {
   const [pendingError, setPendingError] = useState(false)
 
   // Increased thresholds for violations
-  const MAX_NO_FACE_VIOLATIONS = 3
-  const MAX_MULTIPLE_FACES_VIOLATIONS = 3
-  const MAX_TAB_SWITCH_VIOLATIONS = 3
+  const MAX_NO_FACE_VIOLATIONS = 5
+  const MAX_MULTIPLE_FACES_VIOLATIONS = 5
+  const MAX_TAB_SWITCH_VIOLATIONS = 5
 
-  // New states for test status
-  const [testStarted, setTestStarted] = useState(false)
-  const [testSubmitted, setTestSubmitted] = useState(false)
-
+  // Improve the handleSubmit function to properly clean up camera resources
   const handleSubmit = useCallback(async () => {
     if (!test || !userId || isSubmitting) return
 
@@ -173,12 +169,6 @@ export default function TakeTest({ params }: { params: { id: string } }) {
     answers,
     isSubmitting,
   ])
-
-  const handleTabSwitchViolation = useCallback(() => {
-    console.log("Tab switch violation detected - auto-submitting test")
-    // Auto-submit the test
-    handleSubmit()
-  }, [handleSubmit])
 
   const handleProctoringViolation = useCallback(
     (type: "no_face" | "multiple_faces") => {
@@ -308,7 +298,7 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         setPendingViolation(null)
       }
     },
-    [handleSubmit, proctorViolations, toast, MAX_MULTIPLE_FACES_VIOLATIONS, MAX_NO_FACE_VIOLATIONS],
+    [proctorViolations, toast, handleSubmit, MAX_NO_FACE_VIOLATIONS, MAX_MULTIPLE_FACES_VIOLATIONS],
   )
 
   // Set up global error handler
@@ -366,18 +356,31 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         setLoading(true)
         setError(null)
 
-        const testResponse = await fetch(`/api/user/test?testId=${testId}`)
+        // Updated API call to include userId for authorization check
+        const testResponse = await fetch(`/api/user/test?testId=${testId}&userId=${currentUserId}`)
         if (!testResponse.ok) {
-          throw new Error(`Failed to fetch test: ${testResponse.statusText}`)
+          if (testResponse.status === 403) {
+            setError("You are not authorized to access this test. This test has not been assigned to you.")
+          } else {
+            throw new Error(`Failed to fetch test: ${testResponse.statusText}`)
+          }
+          setLoading(false)
+          return
         }
 
         const testData = await testResponse.json()
         if (testData.error) {
-          throw new Error(testData.error)
+          if (testData.error.includes("not assigned") || testData.error.includes("not authorized")) {
+            setError("You are not authorized to access this test. This test has not been assigned to you.")
+          } else {
+            throw new Error(testData.error)
+          }
+          setLoading(false)
+          return
         }
 
         if (!testData.test) {
-          setError("Test not found")
+          setError("Test not found or not assigned to you")
           setLoading(false)
           return
         }
@@ -441,7 +444,6 @@ export default function TakeTest({ params }: { params: { id: string } }) {
           })
         })
       }
-      setTestStarted(true)
     }
   }, [permissionsGranted, toast])
 
@@ -925,8 +927,6 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      <TabSwitchMonitor isActive={testStarted && !testSubmitted} onViolation={handleTabSwitchViolation} />
-
       {/* Fullscreen Warning Dialog */}
       <AlertDialog open={fullscreenWarning} onOpenChange={setFullscreenWarning}>
         <AlertDialogContent>
@@ -945,7 +945,7 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Update the submit test dialog to properly clean up camera resources */}
+      {/* Submit Test Dialog */}
       <AlertDialog open={isSubmitDialogOpen} onOpenChange={setIsSubmitDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -982,7 +982,6 @@ export default function TakeTest({ params }: { params: { id: string } }) {
                 handleSubmit()
                 setShowSidebar(true) // Show sidebar after submission
                 setPermissionsGranted(false) // Reset permissions after submission
-                setTestSubmitted(true)
               }}
               className="bg-purple-700 hover:bg-purple-800 text-white"
             >
@@ -992,7 +991,7 @@ export default function TakeTest({ params }: { params: { id: string } }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Update the time-up dialog to properly clean up camera resources */}
+      {/* Time Up Dialog */}
       <AlertDialog open={isTimeUpDialogOpen} onOpenChange={setIsTimeUpDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1019,7 +1018,6 @@ export default function TakeTest({ params }: { params: { id: string } }) {
                 handleSubmit()
                 setShowSidebar(true) // Show sidebar after time's up submission
                 setPermissionsGranted(false) // Reset permissions after time's up submission
-                setTestSubmitted(true)
               }}
               className="bg-purple-700 hover:bg-purple-800 text-white"
             >

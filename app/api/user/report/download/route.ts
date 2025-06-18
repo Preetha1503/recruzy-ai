@@ -5,7 +5,6 @@ import { getTestWithQuestions } from "@/lib/db/secure-test-operations"
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib"
 import { analyzeUserPerformance, generateRecommendations } from "@/lib/analytics-service"
 import type { TestResult, TestWithQuestions } from "@/lib/types"
-import { PLATFORM_NAME } from "@/lib/constants"
 
 export async function GET(request: NextRequest) {
   try {
@@ -150,7 +149,7 @@ export async function GET(request: NextRequest) {
 
     // Add title
     try {
-      page.drawText(`${PLATFORM_NAME} AI-Powered Interview Platform`, {
+      page.drawText("SAMAJH AI-Powered Interview Platform", {
         x: margin,
         y: height - 20,
         font: helveticaBoldFont,
@@ -158,7 +157,7 @@ export async function GET(request: NextRequest) {
         color: rgb(0.4, 0.2, 0.76), // Purple color
       })
     } catch (e) {
-      console.error("Error drawing text:", `${PLATFORM_NAME} AI-Powered Interview Platform`, e)
+      console.error("Error drawing text:", "SAMAJH AI-Powered Interview Platform", e)
     }
 
     // Add report title
@@ -783,7 +782,7 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        page.drawText(`${PLATFORM_NAME} Interview Platform`, {
+        page.drawText("SAMAJH Interview Platform", {
           x: margin,
           y: margin / 2,
           size: 10,
@@ -791,7 +790,7 @@ export async function GET(request: NextRequest) {
           color: rgb(0.5, 0.5, 0.5),
         })
       } catch (e) {
-        console.error("Error drawing text:", `${PLATFORM_NAME} Interview Platform`, e)
+        console.error("Error drawing text:", "SAMAJH Interview Platform", e)
       }
     }
 

@@ -5,7 +5,6 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Award, BookOpen, ClipboardList, FileText, Home, Settings, User, Users } from "lucide-react"
 import { useState } from "react"
-import { PLATFORM_NAME } from "@/lib/constants"
 
 interface SidebarProps {
   role: "admin" | "user"
@@ -116,7 +115,7 @@ export function Sidebar({ role, username }: SidebarProps) {
     <div className="fixed left-0 top-0 z-50 flex h-full w-64 flex-col border-r bg-white">
       <div className="flex h-16 items-center px-4">
         <Link href="/home" className="text-xl font-bold text-purple-800">
-          {PLATFORM_NAME}
+          SAMAJH
         </Link>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-6">

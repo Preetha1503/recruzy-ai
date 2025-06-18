@@ -22,33 +22,38 @@ export default supabaseServer
 
 // Export a function to create a client with cookies if needed
 export const createServerClient = (cookieStore?: any) => {
-  if (!cookieStore) {
-    return supabaseServer
-  }
+  try {
+    if (!cookieStore) {
+      return supabaseServer
+    }
 
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: false,
-    },
-    cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value || null
+    return createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: false,
       },
-      set(name: string, value: string, options: CookieOptions) {
-        try {
-          cookieStore.set({ name, value, ...options })
-        } catch (e) {
-          console.warn("Failed to set cookie in server:", e)
-        }
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value || null
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options })
+          } catch (e) {
+            console.warn("Failed to set cookie in server:", e)
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.delete({ name, ...options })
+          } catch (e) {
+            console.warn("Failed to remove cookie in server:", e)
+          }
+        },
       },
-      remove(name: string, options: CookieOptions) {
-        try {
-          cookieStore.delete({ name, ...options })
-        } catch (e) {
-          console.warn("Failed to remove cookie in server:", e)
-        }
-      },
-    },
-  })
+    })
+  } catch (error) {
+    console.error("Error creating server client:", error)
+    throw error
+  }
 }
