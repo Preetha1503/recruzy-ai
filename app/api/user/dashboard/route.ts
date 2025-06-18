@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { getActiveTestsForUser } from "@/lib/db/secure-user-test-operations"
-import { getTestResultsByUserId } from "@/lib/db/secure-result-operations"
+import { supabaseServer } from "@/lib/supabase/server"
 
 export async function GET(request: Request) {
   try {
-    // Get userId from query params or cookies
+    // Get userId from query params or cookies (matching existing pattern)
     const url = new URL(request.url)
     const userId = url.searchParams.get("userId") || cookies().get("user_id")?.value
 
@@ -14,47 +13,34 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    console.log(`=== USER DASHBOARD API - START ===`)
     console.log(`Fetching dashboard data for user: ${userId}`)
 
-    // Get active tests for the user with improved error handling
-    try {
-      const userTests = await getActiveTestsForUser(userId)
-      console.log(`Found ${userTests.length} active tests for user`)
+    // Get tests assigned to this specific user through user_tests table
+    const { data: userTests, error: userTestsError } = await supabaseServer
+      .from("user_tests")
+      .select(`
+        id,
+        test_id,
+        user_id,
+        status,
+        assigned_at,
+        due_date,
+        tests (
+          id,
+          title,
+          description,
+          topic,
+          duration,
+          status,
+          created_at
+        )
+      `)
+      .eq("user_id", userId)
+      .eq("status", "assigned")
 
-      // Extract the tests from the user_tests data
-      const activeTests = userTests
-        .filter((test) => test.tests)
-        .map((userTest) => ({
-          ...userTest.tests,
-          due_date: userTest.due_date,
-        }))
-
-      console.log(`Processed ${activeTests.length} active tests`)
-
-      // Get test results for the user
-      const results = await getTestResultsByUserId(userId)
-      console.log(`Found ${results.length} test results for user`)
-
-      // Get total active tests count
-      const activeTestsCount = userTests.length
-
-      // Calculate stats
-      const testsCompleted = results.length
-      const totalScore = results.reduce((sum, result) => sum + (result.score || 0), 0)
-      const averageScore = testsCompleted > 0 ? Math.round(totalScore / testsCompleted) : 0
-
-      // Get recent results (limit to 2)
-      const recentResults = results.slice(0, 2)
-
-      return NextResponse.json({
-        activeTests,
-        recentResults,
-        testsCompleted,
-        averageScore,
-        activeTestsCount,
-      })
-    } catch (error) {
-      console.error("Error processing user data:", error)
+    if (userTestsError) {
+      console.error("Error fetching user tests:", userTestsError)
       return NextResponse.json({
         activeTests: [],
         recentResults: [],
@@ -63,8 +49,75 @@ export async function GET(request: Request) {
         activeTestsCount: 0,
       })
     }
+
+    console.log(`Found ${userTests?.length || 0} user test assignments`)
+
+    // Filter to only include published tests and transform data
+    const assignedTests = (userTests || [])
+      .filter((ut) => ut.tests && ut.tests.status === "published")
+      .map((ut) => ({
+        ...ut.tests,
+        assignment_status: ut.status,
+        assigned_at: ut.assigned_at,
+        due_date: ut.due_date,
+      }))
+
+    console.log(`Found ${assignedTests.length} published assigned tests`)
+
+    // Get user's test results
+    const { data: testResults, error: resultsError } = await supabaseServer
+      .from("test_results")
+      .select(`
+        id,
+        test_id,
+        score,
+        time_taken,
+        completed_at,
+        tests (
+          title,
+          topic
+        )
+      `)
+      .eq("user_id", userId)
+      .order("completed_at", { ascending: false })
+
+    if (resultsError) {
+      console.error("Error fetching test results:", resultsError)
+      // Continue with empty results rather than failing
+    }
+
+    const results = testResults || []
+    console.log(`Found ${results.length} test results for user`)
+
+    // Calculate stats
+    const testsCompleted = results.length
+    const totalScore = results.reduce((sum, result) => sum + (result.score || 0), 0)
+    const averageScore = testsCompleted > 0 ? Math.round(totalScore / testsCompleted) : 0
+
+    // Get recent results (limit to 3)
+    const recentResults = results.slice(0, 3)
+
+    console.log(`=== USER DASHBOARD API - SUCCESS ===`)
+    console.log(`Active tests: ${assignedTests.length}`)
+    console.log(`Tests completed: ${testsCompleted}`)
+    console.log(`Average score: ${averageScore}%`)
+
+    return NextResponse.json({
+      activeTests: assignedTests,
+      recentResults,
+      testsCompleted,
+      averageScore,
+      activeTestsCount: assignedTests.length,
+    })
   } catch (error) {
-    console.error("Error fetching dashboard data:", error)
-    return NextResponse.json({ error: "Failed to fetch dashboard data" }, { status: 500 })
+    console.error("Error in user dashboard API:", error)
+    console.log("=== USER DASHBOARD API - ERROR ===")
+    return NextResponse.json(
+      {
+        error: "Failed to fetch dashboard data",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }

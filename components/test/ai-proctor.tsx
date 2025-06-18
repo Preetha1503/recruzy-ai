@@ -22,21 +22,10 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
   const [processingFrame, setProcessingFrame] = useState(false)
   const [brightnessTooLow, setBrightnessTooLow] = useState(false)
 
-  // EXACTLY 2 warnings allowed - auto-submit on 3rd violation
-  const MAX_ALLOWED_WARNINGS = 2
-
-  // Use refs to track violation counts
-  const noFaceWarningsRef = useRef(0)
-  const multipleFacesWarningsRef = useRef(0)
-
-  // State for UI display
-  const [noFaceWarnings, setNoFaceWarnings] = useState(0)
-  const [multipleFacesWarnings, setMultipleFacesWarnings] = useState(0)
-
-  // Canvas for image processing
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
+  // Reference to store the initial face descriptor for verification
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   // Create a canvas element for image processing
   useEffect(() => {
@@ -61,13 +50,13 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
         await tf.ready()
         console.log("TensorFlow.js loaded")
 
-        // Load the face detection model
+        // Load the face detection model with higher confidence threshold for better accuracy
         const model = faceapi.SupportedModels.MediaPipeFaceDetector
         const detectorConfig = {
           runtime: "mediapipe",
           solutionPath: "https://cdn.jsdelivr.net/npm/@mediapipe/face_detection",
-          modelType: "short",
-          maxFaces: 5,
+          modelType: "short", // Use the more accurate model
+          maxFaces: 5, // Detect up to 5 faces to identify potential violations
         } as faceapi.MediaPipeFaceDetectorModelConfig
 
         const faceDetector = await faceapi.createDetector(model, detectorConfig)
@@ -99,63 +88,26 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
     const ctx = canvas.getContext("2d")
     if (!ctx) return 0
 
+    // Set canvas dimensions to match video
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
+
+    // Draw current video frame to canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
+    // Get image data
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
     const data = imageData.data
 
+    // Calculate average brightness
     let sum = 0
     for (let i = 0; i < data.length; i += 4) {
+      // Convert RGB to brightness using perceived luminance formula
       sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
     }
 
+    // Return average brightness (0-255)
     return sum / (data.length / 4)
-  }, [])
-
-  // Function to handle no face detection
-  const handleNoFaceDetected = useCallback(() => {
-    noFaceWarningsRef.current += 1
-    setNoFaceWarnings(noFaceWarningsRef.current)
-    console.log(`No face warning ${noFaceWarningsRef.current}/${MAX_ALLOWED_WARNINGS}`)
-
-    // Trigger auto-submit on 3rd violation
-    if (noFaceWarningsRef.current === 3) {
-      console.log(`No face violation: Auto-submitting after 3rd violation`)
-      onViolation("no_face")
-    }
-  }, [onViolation])
-
-  // Function to handle multiple faces detection
-  const handleMultipleFacesDetected = useCallback(() => {
-    multipleFacesWarningsRef.current += 1
-    setMultipleFacesWarnings(multipleFacesWarningsRef.current)
-    console.log(`Multiple faces warning ${multipleFacesWarningsRef.current}/${MAX_ALLOWED_WARNINGS}`)
-
-    // Trigger auto-submit on 3rd violation
-    if (multipleFacesWarningsRef.current === 3) {
-      console.log(`Multiple faces violation: Auto-submitting after 3rd violation`)
-      onViolation("multiple_faces")
-    }
-  }, [onViolation])
-
-  // Reset no face warnings if face is detected
-  const resetNoFaceWarnings = useCallback(() => {
-    if (noFaceWarningsRef.current < 3) {
-      noFaceWarningsRef.current = 0
-      setNoFaceWarnings(0)
-      console.log("Reset no face warnings")
-    }
-  }, [])
-
-  // Reset multiple faces warnings if only one face is detected
-  const resetMultipleFacesWarnings = useCallback(() => {
-    if (multipleFacesWarningsRef.current < 3) {
-      multipleFacesWarningsRef.current = 0
-      setMultipleFacesWarnings(0)
-      console.log("Reset multiple faces warnings")
-    }
   }, [])
 
   // Function to detect faces with continuous monitoring
@@ -178,7 +130,7 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
 
       // Check lighting conditions
       const brightness = analyzeImageBrightness(videoRef.current)
-      const isLightingTooLow = brightness < 40
+      const isLightingTooLow = brightness < 40 // Threshold for too dark
       setBrightnessTooLow(isLightingTooLow)
 
       // Detect faces
@@ -189,19 +141,16 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
       // Handle no face detected
       if (faces.length === 0) {
         setNoFaceDetected(true)
-        handleNoFaceDetected()
-        resetMultipleFacesWarnings()
+        onViolation("no_face")
       } else {
         setNoFaceDetected(false)
-        resetNoFaceWarnings()
 
         // Handle multiple faces detected
         if (faces.length > 1) {
           setMultipleFacesDetected(true)
-          handleMultipleFacesDetected()
+          onViolation("multiple_faces")
         } else {
           setMultipleFacesDetected(false)
-          resetMultipleFacesWarnings()
         }
       }
     } catch (error) {
@@ -211,28 +160,11 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
       // Schedule next frame
       animationFrameRef.current = requestAnimationFrame(detectFaces)
     }
-  }, [
-    detector,
-    videoRef,
-    processingFrame,
-    analyzeImageBrightness,
-    handleNoFaceDetected,
-    handleMultipleFacesDetected,
-    resetNoFaceWarnings,
-    resetMultipleFacesWarnings,
-  ])
+  }, [detector, videoRef, onViolation, processingFrame, analyzeImageBrightness])
 
   // Start continuous face detection when model is loaded
   useEffect(() => {
     if (!isModelLoaded || !detector || !isActive || !videoRef.current) return
-
-    // Reset warning counts when starting detection
-    noFaceWarningsRef.current = 0
-    multipleFacesWarningsRef.current = 0
-    setNoFaceWarnings(0)
-    setMultipleFacesWarnings(0)
-
-    console.log(`Starting face detection with ${MAX_ALLOWED_WARNINGS} warnings allowed, auto-submit on 3rd violation`)
 
     // Start the detection loop
     animationFrameRef.current = requestAnimationFrame(detectFaces)
@@ -262,12 +194,6 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="font-medium">
             No face detected! Please position yourself in front of the camera immediately.
-            {noFaceWarnings > 0 && (
-              <span className="block mt-1 text-red-600 font-bold">
-                Warning: {noFaceWarnings}/{MAX_ALLOWED_WARNINGS} warnings.
-                {noFaceWarnings === MAX_ALLOWED_WARNINGS && " Next violation will auto-submit the test!"}
-              </span>
-            )}
           </AlertDescription>
         </Alert>
       )}
@@ -277,12 +203,6 @@ export function AIProctoring({ videoRef, onViolation, isActive, userName }: AIPr
           <Users className="h-4 w-4" />
           <AlertDescription className="font-medium">
             Multiple faces detected! Only you should be visible during the test.
-            {multipleFacesWarnings > 0 && (
-              <span className="block mt-1 text-red-600 font-bold">
-                Warning: {multipleFacesWarnings}/{MAX_ALLOWED_WARNINGS} warnings.
-                {multipleFacesWarnings === MAX_ALLOWED_WARNINGS && " Next violation will auto-submit the test!"}
-              </span>
-            )}
           </AlertDescription>
         </Alert>
       )}

@@ -9,25 +9,30 @@ const isClient = typeof window !== "undefined"
 
 // Get the appropriate Supabase client based on the context
 export function getSupabaseClient(cookieStore?: any) {
-  // If we're on the client, use the client-side Supabase client
-  if (isClient) {
-    return supabase
-  }
+  try {
+    // If we're on the client, use the client-side Supabase client
+    if (isClient) {
+      return supabase
+    }
 
-  // If we're on the server, create a new client with the cookie store
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    cookies: cookieStore
-      ? {
-          get(name: string) {
-            return cookieStore.get(name)?.value
-          },
-          set(name: string, value: string, options: any) {
-            cookieStore.set({ name, value, ...options })
-          },
-          remove(name: string, options: any) {
-            cookieStore.delete({ name, ...options })
-          },
-        }
-      : undefined,
-  })
+    // If we're on the server, create a new client with the cookie store
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      cookies: cookieStore
+        ? {
+            get(name: string) {
+              return cookieStore.get(name)?.value
+            },
+            set(name: string, value: string, options: any) {
+              cookieStore.set({ name, value, ...options })
+            },
+            remove(name: string, options: any) {
+              cookieStore.delete({ name, ...options })
+            },
+          }
+        : undefined,
+    })
+  } catch (error) {
+    console.error("Error getting Supabase client:", error)
+    throw error
+  }
 }

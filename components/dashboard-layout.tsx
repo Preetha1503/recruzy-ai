@@ -67,10 +67,7 @@ export function DashboardLayout({ children, requiredRole, className }: Dashboard
       {/* Hide sidebar when in fullscreen mode */}
       {!isFullscreen && isSidebarVisible && <Sidebar role={requiredRole} username={username} />}
       <div className={`flex-1 ${isSidebarVisible && !isFullscreen ? "md:ml-64" : ""} ${isFullscreen ? "ml-0" : ""}`}>
-        <main className={`container mx-auto p-4 md:p-6 ${className || ""}`}>
-          {/* Platform name can be displayed in a header if needed */}
-          {children}
-        </main>
+        <main className={`container mx-auto p-4 md:p-6 ${className || ""}`}>{children}</main>
       </div>
     </div>
   )

@@ -93,16 +93,24 @@ export async function POST(request: NextRequest) {
       // Don't return an error here, as the user was created successfully
     }
 
-    // Return success response WITHOUT setting cookies
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: newUser.id,
-        username: newUser.username,
-        email: newUser.email,
-        role: newUser.role,
-      },
-    })
+    // Set cookies with proper security settings
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      path: "/",
+      sameSite: "lax" as const,
+    }
+
+    // Create a response object
+    const response = NextResponse.json({ success: true, user: newUser })
+
+    // Set cookies on the response
+    response.cookies.set("user_id", newUser.id, cookieOptions)
+    response.cookies.set("role", newUser.role, cookieOptions)
+    response.cookies.set("username", newUser.username, cookieOptions)
+
+    return response
   } catch (err) {
     console.error("Registration error:", err)
     return NextResponse.json({ error: "An error occurred during registration" }, { status: 500 })
